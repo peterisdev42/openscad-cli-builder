@@ -1,0 +1,22 @@
+# Local OpenSCAD CLI build outputs
+/.build/
+/dist/
+
+# Python tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Local logs and temporary files
+*.log
+*.tmp
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Operating systems
+.DS_Store
+Thumbs.db
