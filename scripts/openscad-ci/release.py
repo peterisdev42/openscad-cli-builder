@@ -3,6 +3,8 @@
 import hashlib
 import json
 import os
+import re
+from datetime import datetime, timezone
 import subprocess
 import sys
 import tarfile
@@ -56,8 +58,22 @@ def verify_assets(dist):
 
 
 VERSION = SOURCE_TAG.removeprefix("openscad-")
-RELEASE_TAG = f"openscad-cli-{VERSION}"
-RELEASE_TITLE = f"OpenSCAD CLI {VERSION}"
+RELEASE_TAG = SOURCE_TAG
+
+
+def release_title_from_commit(tag, commit_date):
+    """Generate a display title using the source commit UTC date and source tag suffix."""
+    match = re.fullmatch(r"openscad-\d{4}\.\d{1,2}(?:\.\d{1,2})?(?:-([A-Za-z][A-Za-z0-9.-]*))?", tag)
+    if match is None:
+        raise ValueError(f"Unsupported OpenSCAD source tag format: {tag!r}")
+    if not commit_date:
+        raise ValueError("Missing OPENSCAD_SOURCE_COMMIT_DATE; refusing to publish")
+    moment = datetime.fromisoformat(commit_date.replace("Z", "+00:00"))
+    if moment.tzinfo is None:
+        raise ValueError("OpenSCAD source commit date must include timezone")
+    date_text = moment.astimezone(timezone.utc).strftime("%Y.%m.%d")
+    suffix = match.group(1)
+    return f"{date_text}-{suffix}" if suffix else date_text
 DOWNLOADS = (
     ("macOS", "Apple Silicon", "macos-arm64"),
     ("macOS", "Intel x64", "macos-x64"),
@@ -114,19 +130,20 @@ def publish(dist, notes, repository):
         ["gh", "api", "--paginate", "--slurp", f"repos/{repository}/releases?per_page=100"], text=True))
     existing = next((r for page in releases for r in page if r["tag_name"] == RELEASE_TAG), None)
     files = [str(dist / name) for name in assets]
+    title = release_title_from_commit(SOURCE_TAG, os.environ.get("OPENSCAD_SOURCE_COMMIT_DATE"))
     common = ["--repo", repository]
     # The newer supported CLI version is Latest, even when historical releases
     # are rebuilt and published after it.
     latest_arg = "--latest" if MODERN_SOURCE else "--latest=false"
     if existing:
         subprocess.check_call(["gh", "release", "upload", RELEASE_TAG, *files, "--clobber", *common])
-        subprocess.check_call(["gh", "release", "edit", RELEASE_TAG, "--title", RELEASE_TITLE,
+        subprocess.check_call(["gh", "release", "edit", RELEASE_TAG, "--title", title,
                                "--notes-file", str(notes), latest_arg, *common])
     else:
         # A moving branch ref remains publishable if main advances during the build.
         # The package build-info.json records the actual immutable builder commit.
         subprocess.check_call(["gh", "release", "create", RELEASE_TAG, *files,
-                               "--target", os.environ["GITHUB_REF_NAME"], "--title", RELEASE_TITLE,
+                               "--target", os.environ["GITHUB_REF_NAME"], "--title", title,
                                "--notes-file", str(notes), latest_arg, *common])
     current = json.loads(subprocess.check_output(
         ["gh", "api", f"repos/{repository}/releases/tags/{RELEASE_TAG}"], text=True))
