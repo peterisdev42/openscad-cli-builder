@@ -1,0 +1,26 @@
+# One-time correction of release metadata, not a build or republish.
+name: Mark OpenSCAD 2026.10-TEST4 as Latest (one-time)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/set-2026-latest-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  mark-latest:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Designate 2026.10-TEST4 as latest without changing assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release edit openscad-cli-2026.10-TEST4 --latest
+          actual="$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)"
+          echo "Current Latest release: $actual"
+          test "$actual" = "openscad-cli-2026.10-TEST4"
