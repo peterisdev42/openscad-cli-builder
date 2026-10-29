@@ -24,6 +24,11 @@ Development Snapshot 版本的 Release Tag 为 `openscad-YYYY.MM.DD`，标题为
 其他分支只上传 Actions artifacts；默认分支五种原生目标和 WASM 打包均通过后，创建或更新
 与所选源码版本对应的 `openscad-cli-<version>` GitHub Release，标题为 `OpenSCAD CLI <version>`，同名附件会被替换。
 使用仓库内置 `GITHUB_TOKEN`，发布 job 具有 `contents: write` 权限。
+Release 正文顶部包含 schemaVersion=1 的 YAML 代码块，记录版本、渠道、官方 OpenSCAD Commit，
+并保留原有下载表格。Stable 为 `prerelease=false` 且标记 Latest；
+RC、TEST、Snapshot 为 `prerelease=true` 且不标记 Latest。
+历史 Release 的元数据可通过独立的 `Reconcile Release Metadata` 工作流更新，
+该工作流不编译或修改任何打包附件。
 创建 Release 时以默认分支名为目标，避免构建期间分支前进后，对旧工作流提交创建标签触发 403。
 Release 标签作为下载入口；实际构建脚本提交以每个包内的 `build-info.json` 为准。
 同一分支有新提交时，自动取消旧轮次，只验证最新版本。
