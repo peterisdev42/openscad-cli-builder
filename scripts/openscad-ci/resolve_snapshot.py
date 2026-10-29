@@ -85,7 +85,8 @@ def main():
         print(f"Downloading upstream OpenSCAD snapshot {version}: {url}", file=sys.stderr)
         expected_hash = parse_checksum(download(url + ".sha256").decode("ascii"), basename)
         download(url, appimage)
-        actual_hash = hashlib.file_digest(open(appimage, "rb"), "sha256").hexdigest()
+        with open(appimage, "rb") as stream:
+            actual_hash = hashlib.file_digest(stream, "sha256").hexdigest()
         if actual_hash != expected_hash:
             raise ValueError("Official AppImage SHA256 mismatch")
         appimage.chmod(0o755)
@@ -99,6 +100,8 @@ def main():
         result = subprocess.run(["xvfb-run", "-a", str(apprun), "--info"], cwd=folder,
                                 env=environment, text=True, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, timeout=120)
+        print("Official AppRun --info exit code:", result.returncode, file=sys.stderr)
+        print("Official AppRun --info output:\n" + result.stdout[:12000], file=sys.stderr)
         short_sha = parse_version_info(result.stdout, version)
         full_sha = resolve_commit(short_sha)
     print(f"Resolved official OpenSCAD snapshot {version} to {full_sha}", file=sys.stderr)
