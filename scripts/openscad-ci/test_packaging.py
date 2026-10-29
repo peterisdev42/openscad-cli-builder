@@ -29,11 +29,12 @@ class PackagingTests(unittest.TestCase):
             ("openscad-2026.10-RC1", "2026-10-15T02:45:40Z", "2026.10.15-RC1"),
             ("openscad-2026.10.15-snapshot", "2026-10-15T23:45:40-04:00", "2026.10.16-snapshot"),
         )
-        for tag, date, expected in cases:
-            with self.subTest(tag=tag):
-                self.assertEqual(release_title_from_commit(tag, date), expected)
-        with self.assertRaisesRegex(ValueError, "Missing"):
-            release_title_from_commit("openscad-2021.01", None)
+        with mock.patch.dict(os.environ, {"OPENSCAD_SNAPSHOT": "false"}):
+            for tag, date, expected in cases:
+                with self.subTest(tag=tag):
+                    self.assertEqual(release_title_from_commit(tag, date), expected)
+            with self.assertRaisesRegex(ValueError, "Missing"):
+                release_title_from_commit("openscad-2021.01", None)
 
     def test_snapshot_title_is_upstream_date_not_commit_date(self):
         with mock.patch.dict(os.environ, {"OPENSCAD_SNAPSHOT": "true"}):
@@ -185,11 +186,14 @@ class PackagingTests(unittest.TestCase):
     def test_source_pin_matches_peeled_tag_commit_and_workflow(self):
         commit = subprocess.check_output([
             "git", "-C", str(ROOT / "sources/openscad"), "rev-parse",
-            f"{SOURCE_TAG}^{{commit}}"], text=True).strip()
+            "HEAD^{commit}"], text=True).strip()
         self.assertEqual(SOURCE_COMMIT, commit)
         workflow = (ROOT / ".github/workflows/openscad-cli.yml").read_text()
-        self.assertIn(commit, workflow)
-        self.assertIn("ref: ${{ env.OPENSCAD_TAG }}", workflow)
+        self.assertIn("ref: ${{ needs.resolve.outputs.commit }}", workflow)
+        if os.environ.get("OPENSCAD_SNAPSHOT") == "true":
+            self.assertTrue((ROOT / "scripts/openscad-ci/resolve_snapshot.py").is_file())
+        else:
+            self.assertIn(commit, workflow)
 
     @unittest.skipIf(MODERN_SOURCE, "Legacy patch is exercised when selecting openscad-2021.01")
     def test_patch_applies_to_actual_tag_and_rejects_reapplication(self):
@@ -227,27 +231,27 @@ class PackagingTests(unittest.TestCase):
     @unittest.skipUnless(MODERN_SOURCE, "Modern target requires the TEST4 source checkout")
     def test_modern_patch_preserves_backends_and_uses_console_target(self):
         original = subprocess.check_output([
-            "git", "-C", str(ROOT / "sources/openscad"), "show", f"{SOURCE_TAG}:CMakeLists.txt"], text=True)
+            "git", "-C", str(ROOT / "sources/openscad"), "show", f"{SOURCE_COMMIT}:CMakeLists.txt"], text=True)
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory)
             (source / 'CMakeLists.txt').write_text(original)
             (source / 'cmake/Modules').mkdir(parents=True)
             (source / 'cmake/Modules/FindOpenCSG.cmake').write_text(subprocess.check_output([
                 'git', '-C', str(ROOT / 'sources/openscad'), 'show',
-                f'{SOURCE_TAG}:cmake/Modules/FindOpenCSG.cmake'], text=True))
+                f'{SOURCE_COMMIT}:cmake/Modules/FindOpenCSG.cmake'], text=True))
             (source / 'src').mkdir()
             (source / 'src/main_wrapper.cc').write_text(subprocess.check_output([
                 'git', '-C', str(ROOT / 'sources/openscad'), 'show',
-                f'{SOURCE_TAG}:src/main_wrapper.cc'], text=True))
+                f'{SOURCE_COMMIT}:src/main_wrapper.cc'], text=True))
             (source / 'src/glview').mkdir()
             (source / 'src/glview/OffscreenView.cc').write_text(subprocess.check_output([
                 'git', '-C', str(ROOT / 'sources/openscad'), 'show',
-                f'{SOURCE_TAG}:src/glview/OffscreenView.cc'], text=True))
+                f'{SOURCE_COMMIT}:src/glview/OffscreenView.cc'], text=True))
             (source / 'resources').mkdir()
             for name in ('openscad_win32.rc.in', 'openscad_win32-nightly.rc.in'):
                 (source / 'resources' / name).write_text(subprocess.check_output([
                     'git', '-C', str(ROOT / 'sources/openscad'), 'show',
-                    f'{SOURCE_TAG}:resources/{name}'], text=True))
+                    f'{SOURCE_COMMIT}:resources/{name}'], text=True))
             patch_modern_source(source)
             for path in (source / 'resources').glob('*.rc.in'):
                 self.assertNotIn('RT_MANIFEST', path.read_text())

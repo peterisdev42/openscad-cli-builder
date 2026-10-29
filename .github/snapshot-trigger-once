@@ -1,1 +1,1 @@
-Snapshot retry: install EGL library required by upstream AppImage.
+Snapshot retry: test sources against immutable commit, not a nonexistent upstream tag.
