@@ -1,1 +1,0 @@
-Snapshot retry: test sources against immutable commit, not a nonexistent upstream tag.

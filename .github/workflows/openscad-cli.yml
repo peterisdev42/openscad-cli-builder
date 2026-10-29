@@ -11,10 +11,6 @@ on:
           - latest-snapshot
           - openscad-2026.10-TEST4
           - openscad-2021.01
-  # One-time bootstrapping trigger; removed after the initial snapshot run is queued.
-  push:
-    paths:
-      - .github/snapshot-trigger-once
 
 permissions:
   contents: read
