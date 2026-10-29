@@ -4,46 +4,103 @@ on:
   workflow_dispatch:
     inputs:
       source_tag:
-        description: OpenSCAD source tag to build and release
+        description: OpenSCAD source to build and release
         type: choice
-        default: openscad-2026.10-TEST4
+        default: latest-snapshot
         options:
+          - latest-snapshot
           - openscad-2026.10-TEST4
           - openscad-2021.01
+  # One-time bootstrapping trigger; removed after the initial snapshot run is queued.
   push:
     paths:
-      - .github/workflows/openscad-cli.yml
-      - scripts/openscad-ci/**
+      - .github/snapshot-trigger-once
 
 permissions:
   contents: read
 
 concurrency:
-  group: openscad-cli-${{ github.ref }}-${{ inputs.source_tag || 'openscad-2026.10-TEST4' }}
+  group: openscad-cli-${{ github.ref }}-${{ inputs.source_tag || 'latest-snapshot' }}
   cancel-in-progress: true
 
 env:
   PYTHONUTF8: '1'
-  OPENSCAD_TAG: ${{ inputs.source_tag || 'openscad-2026.10-TEST4' }}
-  OPENSCAD_COMMIT: ${{ inputs.source_tag == 'openscad-2021.01' && '41f58fe57c03457a3a8b4dc541ef5654ec3e8c78' || '5a864f17b6b022904004704f64e6168d2cfb8435' }}
   VCPKG_COMMIT: 6f7ffeb18f99796233b958aaaf14ec7bd4fb64b2
 
 jobs:
+  resolve:
+    name: Resolve immutable upstream source
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.source.outputs.tag }}
+      commit: ${{ steps.source.outputs.commit }}
+      repo: ${{ steps.source.outputs.repo }}
+      snapshot: ${{ steps.source.outputs.snapshot }}
+      source_url: ${{ steps.source.outputs.source_url }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Resolve OpenSCAD source revision
+        id: source
+        shell: bash
+        env:
+          SELECTED_SOURCE: ${{ inputs.source_tag || 'latest-snapshot' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ "$SELECTED_SOURCE" == latest-snapshot ]]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y xvfb xauth libgl1 libglx-mesa0 libgl1-mesa-dri
+            python3 scripts/openscad-ci/resolve_snapshot.py >> "$GITHUB_OUTPUT"
+          else
+            case "$SELECTED_SOURCE" in
+              openscad-2021.01) sha=41f58fe57c03457a3a8b4dc541ef5654ec3e8c78 ;;
+              openscad-2026.10-TEST4) sha=5a864f17b6b022904004704f64e6168d2cfb8435 ;;
+              *) echo "Unsupported source: $SELECTED_SOURCE" >&2; exit 1 ;;
+            esac
+            {
+              echo "tag=$SELECTED_SOURCE"
+              echo "commit=$sha"
+              echo "repo=peterisdev42/openscad"
+              echo "snapshot=false"
+              echo "source_url="
+            } >> "$GITHUB_OUTPUT"
+          fi
+      - name: Record resolved revision
+        env:
+          SOURCE_TAG: ${{ steps.source.outputs.tag }}
+          SOURCE_COMMIT: ${{ steps.source.outputs.commit }}
+          SOURCE_REPO: ${{ steps.source.outputs.repo }}
+        run: |
+          echo "Source: $SOURCE_REPO @ $SOURCE_COMMIT ($SOURCE_TAG)"
+          echo "### OpenSCAD source" >> "$GITHUB_STEP_SUMMARY"
+          echo "$SOURCE_REPO @ \`$SOURCE_COMMIT\` ($SOURCE_TAG)" >> "$GITHUB_STEP_SUMMARY"
+
   validate:
     name: Validate packaging and release gates
+    needs: resolve
     runs-on: ubuntu-22.04
+    env:
+      OPENSCAD_TAG: ${{ needs.resolve.outputs.tag }}
+      OPENSCAD_COMMIT: ${{ needs.resolve.outputs.commit }}
+      OPENSCAD_SNAPSHOT: ${{ needs.resolve.outputs.snapshot }}
+      OPENSCAD_SNAPSHOT_URL: ${{ needs.resolve.outputs.source_url }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/checkout@v5
         with:
-          repository: peterisdev42/openscad
-          ref: ${{ env.OPENSCAD_TAG }}
+          repository: ${{ needs.resolve.outputs.repo }}
+          ref: ${{ needs.resolve.outputs.commit }}
           path: sources/openscad
       - run: python3 -m unittest discover -s scripts/openscad-ci -p 'test_*.py' -v
 
   build:
     name: ${{ matrix.label }}
-    needs: validate
+    needs: [resolve, validate]
+    env:
+      OPENSCAD_TAG: ${{ needs.resolve.outputs.tag }}
+      OPENSCAD_COMMIT: ${{ needs.resolve.outputs.commit }}
+      OPENSCAD_SNAPSHOT: ${{ needs.resolve.outputs.snapshot }}
+      OPENSCAD_SNAPSHOT_URL: ${{ needs.resolve.outputs.source_url }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:
@@ -58,8 +115,8 @@ jobs:
       # Fetch only OpenSCAD and its pinned submodules, not the builder's other sources.
       - uses: actions/checkout@v5
         with:
-          repository: peterisdev42/openscad
-          ref: ${{ env.OPENSCAD_TAG }}
+          repository: ${{ needs.resolve.outputs.repo }}
+          ref: ${{ needs.resolve.outputs.commit }}
           path: sources/openscad
           submodules: recursive
       - name: Verify immutable source revision
@@ -153,7 +210,12 @@ jobs:
 
   linux:
     name: ${{ matrix.target }}
-    needs: validate
+    needs: [resolve, validate]
+    env:
+      OPENSCAD_TAG: ${{ needs.resolve.outputs.tag }}
+      OPENSCAD_COMMIT: ${{ needs.resolve.outputs.commit }}
+      OPENSCAD_SNAPSHOT: ${{ needs.resolve.outputs.snapshot }}
+      OPENSCAD_SNAPSHOT_URL: ${{ needs.resolve.outputs.source_url }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     strategy:
@@ -166,8 +228,8 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/checkout@v5
         with:
-          repository: peterisdev42/openscad
-          ref: ${{ env.OPENSCAD_TAG }}
+          repository: ${{ needs.resolve.outputs.repo }}
+          ref: ${{ needs.resolve.outputs.commit }}
           path: sources/openscad
           submodules: recursive
       - uses: actions/setup-python@v6
@@ -213,15 +275,20 @@ jobs:
 
   wasm:
     name: wasm
-    needs: validate
+    needs: [resolve, validate]
+    env:
+      OPENSCAD_TAG: ${{ needs.resolve.outputs.tag }}
+      OPENSCAD_COMMIT: ${{ needs.resolve.outputs.commit }}
+      OPENSCAD_SNAPSHOT: ${{ needs.resolve.outputs.snapshot }}
+      OPENSCAD_SNAPSHOT_URL: ${{ needs.resolve.outputs.source_url }}
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v5
       - uses: actions/checkout@v5
         with:
-          repository: peterisdev42/openscad
-          ref: ${{ env.OPENSCAD_TAG }}
+          repository: ${{ needs.resolve.outputs.repo }}
+          ref: ${{ needs.resolve.outputs.commit }}
           path: sources/openscad
           submodules: recursive
       - uses: actions/setup-python@v6
@@ -263,7 +330,12 @@ jobs:
 
   release:
     name: Verify release packages; publish on default branch
-    needs: [build, linux, wasm]
+    needs: [resolve, build, linux, wasm]
+    env:
+      OPENSCAD_TAG: ${{ needs.resolve.outputs.tag }}
+      OPENSCAD_COMMIT: ${{ needs.resolve.outputs.commit }}
+      OPENSCAD_SNAPSHOT: ${{ needs.resolve.outputs.snapshot }}
+      OPENSCAD_SNAPSHOT_URL: ${{ needs.resolve.outputs.source_url }}
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -271,8 +343,8 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/checkout@v5
         with:
-          repository: peterisdev42/openscad
-          ref: ${{ env.OPENSCAD_TAG }}
+          repository: ${{ needs.resolve.outputs.repo }}
+          ref: ${{ needs.resolve.outputs.commit }}
           path: sources/openscad
       - name: Determine OpenSCAD source commit date (UTC)
         shell: bash

@@ -230,7 +230,8 @@ def main():
     run("docker", "run", "--rm", "--platform=linux/amd64",
         "-v", f"{ROOT}:/workspace", "-v", f"{cache}:/ccache",
         "-e", "CCACHE_DIR=/ccache", "-e", "CCACHE_BASEDIR=/workspace",
-        "-e", f"OPENSCAD_TAG={SOURCE_TAG}", "-w", "/workspace", WASM_IMAGE,
+        "-e", f"OPENSCAD_TAG={SOURCE_TAG}", "-e", f"OPENSCAD_COMMIT={SOURCE_COMMIT}",
+         "-w", "/workspace", WASM_IMAGE,
         "bash", "scripts/openscad-ci/wasm-build.sh")
     package = stage_wasm(source, work / "build", work)
     dist = ROOT / "dist"

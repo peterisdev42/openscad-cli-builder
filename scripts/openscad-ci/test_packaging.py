@@ -35,6 +35,13 @@ class PackagingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Missing"):
             release_title_from_commit("openscad-2021.01", None)
 
+    def test_snapshot_title_is_upstream_date_not_commit_date(self):
+        with mock.patch.dict(os.environ, {"OPENSCAD_SNAPSHOT": "true"}):
+            self.assertEqual(release_title_from_commit("openscad-2026.10.29",
+                                                       "2026-10-30T04:00:00Z"), "2026.10.29")
+            with self.assertRaisesRegex(ValueError, "Snapshot release"):
+                release_title_from_commit("openscad-2026.10-TEST4", "2026-10-30T04:00:00Z")
+
     def test_smoke_preserves_version_failure_diagnostics(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
