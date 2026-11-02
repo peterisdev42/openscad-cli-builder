@@ -6,6 +6,7 @@ on:
       - .github/workflows/preview-exporter.yml
       - scripts/openscad-ci/build.py
       - scripts/openscad-ci/preview_exporter/**
+      - scripts/openscad-ci/test_preview*.py
   workflow_dispatch:
     inputs:
       source_tag:
@@ -88,7 +89,7 @@ jobs:
             openscad-deps-v2-macos-arm64-${{ env.VCPKG_COMMIT }}-${{ hashFiles('scripts/openscad-ci/vcpkg.json', 'scripts/openscad-ci/triplets/**') }}-
             preview-deps-macos-arm64-${{ env.VCPKG_COMMIT }}-
       - name: Verify injection against RC0 source
-        run: python3 -m unittest discover -s scripts/openscad-ci -p 'test_preview_exporter.py' -v
+        run: python3 -m unittest discover -s scripts/openscad-ci -p 'test_preview*.py' -v
       - name: Build exporter, test relocated archive and Boolean products
         env:
           VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.build/vcpkg-cache,readwrite
@@ -138,20 +139,7 @@ jobs:
           path: dist
       - name: Verify archive, checksum and source metadata
         run: python3 scripts/openscad-ci/preview_exporter/verify_release.py dist
-      - name: Publish independent release tag
+      - name: Publish only after remote download and full archive verification
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: preview-exporter-openscad-2026.11-RC0
-        run: |
-          set -euo pipefail
-          archive=dist/openscad-preview-exporter-macos-arm64.tar.gz
-          checksum="$archive.sha256"
-          title='OpenSCAD Preview Exporter 2026.11-RC0 · macOS ARM64'
-          notes="Preview Scene schema v1; source openscad/openscad@$OPENSCAD_COMMIT. Independent of standard CLI releases."
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "$archive" "$checksum" --clobber
-            gh release edit "$RELEASE_TAG" --title "$title" --notes "$notes" --prerelease --latest=false
-          else
-            gh release create "$RELEASE_TAG" "$archive" "$checksum" \
-              --title "$title" --notes "$notes" --prerelease --latest=false --target "$GITHUB_SHA"
-          fi
+        run: python3 scripts/openscad-ci/preview_exporter/publish.py dist
