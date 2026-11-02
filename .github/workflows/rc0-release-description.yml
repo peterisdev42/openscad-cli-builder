@@ -1,3 +1,4 @@
+## Metadata-only repair; the complete RC0 Release binaries are unchanged.
 name: Update unified OpenSCAD RC0 Release description
 
 on:
