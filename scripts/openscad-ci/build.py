@@ -722,7 +722,10 @@ def main():
     repo = ROOT / "sources/openscad"
     if output("git", "-C", repo, "rev-parse", "HEAD") != SOURCE_COMMIT:
         raise RuntimeError(f"Expected {SOURCE_TAG} at {SOURCE_COMMIT}")
-    work = ROOT / ".build" / target
+    # The same macOS ARM64 job compiles *both* normal CLI and the optional
+    # Preview Exporter. Their CMake build trees and source patches must never
+    # overlap, while keeping the shared pinned vcpkg install/cache.
+    work = ROOT / ".build" / (target + ("-preview-exporter" if PREVIEW_EXPORTER else ""))
     work.mkdir(parents=True)
     source = work / "source"
     archive_source(repo, source)
@@ -739,7 +742,20 @@ def main():
     options = []
     if not target.startswith("linux"):
         triplet = os.environ["TRIPLET"]
-        vcpkg, prefix = install_dependencies(target, triplet)
+        if PREVIEW_EXPORTER and os.environ.get("SCAD_REUSE_VCPKG") == "1":
+            # vcpkg port compatibility patches are not idempotent. They were
+            # already applied by the normal CLI build in this same Actions job.
+            vcpkg, prefix = ROOT / ".build/vcpkg", ROOT / ".build/installed" / triplet
+            if output("git", "-C", vcpkg, "rev-parse", "HEAD") != VCPKG_COMMIT:
+                raise RuntimeError("Pinned vcpkg revision changed between builds")
+            if not (prefix / "lib").is_dir():
+                raise RuntimeError("CLI dependencies missing; exporter must run after native CLI")
+            os.environ["PKG_CONFIG_PATH"] = os.pathsep.join(
+                str(prefix / item) for item in ("lib/pkgconfig", "share/pkgconfig"))
+            os.environ["PKG_CONFIG_LIBDIR"] = os.environ["PKG_CONFIG_PATH"]
+            os.environ["PATH"] = str(prefix / "bin") + os.pathsep + os.environ["PATH"]
+        else:
+            vcpkg, prefix = install_dependencies(target, triplet)
         options += [f"-DCMAKE_TOOLCHAIN_FILE={vcpkg}/scripts/buildsystems/vcpkg.cmake",
                     f"-DVCPKG_INSTALLED_DIR={prefix.parent}", f"-DVCPKG_TARGET_TRIPLET={triplet}",
                     f"-DVCPKG_OVERLAY_TRIPLETS={HERE}/triplets", "-DVCPKG_MANIFEST_MODE=OFF"]
