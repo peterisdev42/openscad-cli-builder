@@ -28,7 +28,8 @@ class PreviewReleaseTests(unittest.TestCase):
             "README.md": b"Preview exporter readme",
             "bin/openscad-preview-exporter": b'#!/bin/sh\nexec "$base/OpenSCAD.app/Contents/MacOS/OpenSCAD" "$@"\n',
             "OpenSCAD.app/Contents/MacOS/OpenSCAD":
-                b"\xcf\xfa\xed\xfe" + struct.pack("<I", machine) + b"".join(\n                    hashlib.sha256(str(i).encode()).digest() for i in range(128)),
+                b"\xcf\xfa\xed\xfe" + struct.pack("<I", machine) + b"".join(
+                    hashlib.sha256(str(i).encode()).digest() for i in range(128)),
         }
         archive = folder / ARCHIVE
         with tarfile.open(archive, "w:gz") as output:
