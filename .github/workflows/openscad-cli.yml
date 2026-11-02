@@ -9,6 +9,7 @@ on:
         default: latest-snapshot
         options:
           - latest-snapshot
+          - openscad-2026.11-RC0
           - openscad-2026.10-TEST4
           - openscad-2021.01
 
@@ -51,12 +52,13 @@ jobs:
             case "$SELECTED_SOURCE" in
               openscad-2021.01) sha=41f58fe57c03457a3a8b4dc541ef5654ec3e8c78 ;;
               openscad-2026.10-TEST4) sha=5a864f17b6b022904004704f64e6168d2cfb8435 ;;
+              openscad-2026.11-RC0) sha=9ba0cee7c94785fac0ca8dfe040b965a12a25ed1; source_repo=openscad/openscad ;;
               *) echo "Unsupported source: $SELECTED_SOURCE" >&2; exit 1 ;;
             esac
             {
               echo "tag=$SELECTED_SOURCE"
               echo "commit=$sha"
-              echo "repo=peterisdev42/openscad"
+              echo "repo=${source_repo:-peterisdev42/openscad}"
               echo "snapshot=false"
               echo "source_url="
             } >> "$GITHUB_OUTPUT"
