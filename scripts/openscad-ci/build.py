@@ -528,7 +528,7 @@ def stage(source, build, work, target, prefix, mesa):
         '<fontconfig><dir prefix="relative">.</dir>'
         '<cachedir prefix="xdg">fontconfig</cachedir></fontconfig>\n')
     shutil.copy2(source / "COPYING", package / "COPYING")
-    shutil.copy2(HERE / "README.md", package / "README.md")
+    shutil.copy2(HERE / ("preview_exporter/README.md" if PREVIEW_EXPORTER else "README.md"), package / "README.md")
     copy_licenses(package, prefix)
     if MODERN_SOURCE:
         for module in (source / "submodules").iterdir():
