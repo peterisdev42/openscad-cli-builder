@@ -683,7 +683,8 @@ def smoke_test(package, target, work):
             run(binary, "-o", output_file, csg_file, env=env, cwd=test,
                 stdout=stream, stderr=subprocess.STDOUT)
             scene = json.loads(output_file.read_text())
-            if (scene.get("schemaVersion") != 1 or not scene.get("meshes")
+            if (scene.get("schemaVersion") != 1 or scene.get("upstreamCommit") != SOURCE_COMMIT
+                    or scene.get("upstreamTag") != SOURCE_TAG or not scene.get("meshes")
                     or len(scene.get("instances", [])) < 2
                     or not any(p["subtractions"] for p in scene.get("products", []))):
                 raise RuntimeError("Preview Exporter returned incorrect Boolean products")
