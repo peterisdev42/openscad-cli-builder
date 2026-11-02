@@ -688,6 +688,25 @@ def smoke_test(package, target, work):
                     or len(scene.get("instances", [])) < 2
                     or not any(p["subtractions"] for p in scene.get("products", []))):
                 raise RuntimeError("Preview Exporter returned incorrect Boolean products")
+            for mesh in scene["meshes"]:
+                positions = mesh["positions"]
+                if not positions or any(len(p) != 3 for p in positions):
+                    raise RuntimeError("Preview Scene contains invalid vertex positions")
+                if not mesh["indices"] or any(
+                        len(face) != 3 or any(
+                            not isinstance(index, int) or index < 0 or index >= len(positions)
+                            for index in face)
+                        for face in mesh["indices"]):
+                    raise RuntimeError("Preview Scene contains invalid triangle indices")
+            # cube() is exported as six quads by the official CSG evaluator;
+            # the independent exporter must preserve it as 12 triangles.
+            cube_meshes = [
+                mesh for mesh in scene["meshes"]
+                if len(mesh["indices"]) == 12 and
+                   {round(coord, 3) for point in mesh["positions"] for coord in point} == {-5.0, 5.0}
+            ]
+            if not cube_meshes:
+                raise RuntimeError("Official cube facets were not triangulated into 12 faces")
             for instance in scene["instances"]:
                 if instance["mesh"] >= len(scene["meshes"]) or len(instance["matrix"]) != 16:
                     raise RuntimeError("Invalid Preview Scene mesh or transform reference")
