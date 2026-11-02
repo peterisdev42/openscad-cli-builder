@@ -30,6 +30,7 @@ class PreviewExporterTests(unittest.TestCase):
             self.assertTrue((source / "src/preview_scene_exporter.h").is_file())
             self.assertIn("PREVIEW_SCENE,", (source / FILES[0]).read_text())
             self.assertIn('"preview-scene", "csgp"', (source / FILES[1]).read_text())
+            self.assertIn('identifierToInfo["csgp"]', (source / FILES[1]).read_text())
             self.assertIn("scad_preview_exporter::exportScene", (source / FILES[2]).read_text())
             for name in FILES:
                 self.assertNotIn("scad_preview_exporter::exportScene", (upstream / name).read_text())
