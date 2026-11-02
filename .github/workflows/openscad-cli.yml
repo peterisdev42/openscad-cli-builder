@@ -1,8 +1,9 @@
 name: Package OpenSCAD CLI
 
 on:
-  # RC0's complete CLI + Preview Exporter release is triggered together by a
-  # deliberately marked merge commit, never by an arbitrary push.
+  # Explicit RC0 release trigger: this main-branch workflow update rebuilds
+  # all six native/WASM CLI packages plus the ARM64 Preview Exporter.
+  # Arbitrary pushes never publish this pinned RC0 release.
   push:
     branches: [main]
     paths:
