@@ -19,8 +19,12 @@ HERE = Path(__file__).resolve().parent
 SOURCE_REVISIONS = {
     "openscad-2021.01": "41f58fe57c03457a3a8b4dc541ef5654ec3e8c78",
     "openscad-2026.10-TEST4": "5a864f17b6b022904004704f64e6168d2cfb8435",
+    "openscad-2026.11-RC0": "9ba0cee7c94785fac0ca8dfe040b965a12a25ed1",
 }
 SOURCE_TAG = os.environ.get("OPENSCAD_TAG", "openscad-2026.10-TEST4")
+PREVIEW_EXPORTER = os.environ.get("SCAD_PREVIEW_EXPORTER") == "1"
+if PREVIEW_EXPORTER and os.environ.get("TARGET") != "macos-arm64":
+    raise ValueError("Preview Exporter is supported only for macOS ARM64")
 SOURCE_COMMIT = os.environ.get("OPENSCAD_COMMIT") or SOURCE_REVISIONS[SOURCE_TAG]
 if not re.fullmatch(r"[a-f0-9]{40}", SOURCE_COMMIT):
     raise ValueError("OpenSCAD source revision must be a full 40-character SHA")
@@ -38,6 +42,10 @@ LINUX_LDD_ENTRY = re.compile(r"^\s*(\S+) => (/.+?)\s+\(0x[0-9a-fA-F]+\)\s*$", re
 
 
 def package_name(target):
+    if PREVIEW_EXPORTER:
+        if target != "macos-arm64":
+            raise ValueError("Preview Exporter is supported only for macOS ARM64")
+        return "openscad-preview-exporter-macos-arm64"
     return "openscad-cli-" + target.replace("-x64", "-x86_64")
 
 
@@ -469,6 +477,8 @@ def stage(source, build, work, target, prefix, mesa):
         wrapper.write_text('#!/bin/sh\nset -eu\nbase=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\n'
                            'exec "$base/OpenSCAD.app/Contents/MacOS/OpenSCAD" "$@"\n')
         wrapper.chmod(0o755)
+        if PREVIEW_EXPORTER:
+            wrapper.rename(bin_dir / "openscad-preview-exporter")
     elif target.startswith("windows"):
         binary = bin_dir / "openscad.exe"
         shutil.copy2(build / "OpenSCAD.exe", binary)
@@ -529,6 +539,8 @@ def stage(source, build, work, target, prefix, mesa):
     (package / "build-info.json").write_text(json.dumps({
         "tag": SOURCE_TAG, "commit": SOURCE_COMMIT, "target": target,
         "headless": True, "opengl": True, "nullgl": False,
+        "preview_exporter": PREVIEW_EXPORTER,
+        "preview_scene_schema": 1 if PREVIEW_EXPORTER else None,
         "vcpkg_commit": VCPKG_COMMIT if prefix else None,
         "mesa": MESA_VERSION if mesa else None,
         "msvc_runtime": runtime_version,
@@ -612,7 +624,8 @@ def verify_runtime_dependencies(package, target):
 
 def smoke_test(package, target, work):
     verify_runtime_dependencies(package, target)
-    binary = package / "bin" / ("openscad.exe" if target.startswith("windows") else "openscad")
+    binary = package / "bin" / ("openscad.exe" if target.startswith("windows") else
+                                "openscad-preview-exporter" if PREVIEW_EXPORTER else "openscad")
     env = os.environ.copy()
     for name in ("OPENSCADPATH", "OPENSCAD_FONT_PATH", "FONTCONFIG_PATH", "FONTCONFIG_FILE",
                  "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH"):
@@ -662,6 +675,21 @@ def smoke_test(package, target, work):
                     raise RuntimeError("Invalid PNG output")
             elif name.endswith(".3mf") and artifact.read_bytes()[:4] != b"PK\x03\x04":
                 raise RuntimeError("Invalid 3MF output")
+        if PREVIEW_EXPORTER:
+            # A real Boolean product must survive the official CPU pipeline.
+            csg_file = test / "prepared-scene.scad"
+            csg_file.write_text("difference() { cube(10,center=true); sphere(r=4,$fn=12); }\n")
+            output_file = test / "prepared-scene.csgp"
+            run(binary, "-o", output_file, csg_file, env=env, cwd=test,
+                stdout=stream, stderr=subprocess.STDOUT)
+            scene = json.loads(output_file.read_text())
+            if (scene.get("schemaVersion") != 1 or not scene.get("meshes")
+                    or len(scene.get("instances", [])) < 2
+                    or not any(p["subtractions"] for p in scene.get("products", []))):
+                raise RuntimeError("Preview Exporter returned incorrect Boolean products")
+            for instance in scene["instances"]:
+                if instance["mesh"] >= len(scene["meshes"]) or len(instance["matrix"]) != 16:
+                    raise RuntimeError("Invalid Preview Scene mesh or transform reference")
         run(binary, "--info", env=env, cwd=test, stdout=stream, stderr=subprocess.STDOUT)
     if re.search(r"ERROR:|WARNING: Can't open|WARNING: Ignoring unknown module|Could not initialize localization", log.read_text()):
         raise RuntimeError("Smoke test reported a missing resource or rendering error")
@@ -684,6 +712,9 @@ def main():
         path = line.split()[1]
         archive_source(repo / path, source / path)
     patch_source(source)
+    if PREVIEW_EXPORTER:
+        from preview_exporter.patch import patch_preview_exporter
+        patch_preview_exporter(source)
     prefix = mesa = None
     options = []
     if not target.startswith("linux"):
