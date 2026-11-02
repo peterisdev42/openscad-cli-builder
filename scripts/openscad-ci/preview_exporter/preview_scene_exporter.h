@@ -112,7 +112,7 @@ class SceneWriter {
       output << "],\"color\":[";
       for (int c = 0; c < 4; ++c) {
         if (c) output << ',';
-        numeric(output, leaf->color[c]);
+        numeric(output, leaf->color.toVector4f()[c]);
       }
       output << "],\"convexity\":" << leaf->polyset->getConvexity() << '}';
     }
