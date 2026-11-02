@@ -36,6 +36,14 @@ def patch_preview_exporter(source: Path):
         '    add_item(*containers, {FileFormat::TERM, "term", "term", "term"});\n'
         '    add_item(*containers, {FileFormat::PREVIEW_SCENE, "preview-scene", "csgp", "Prepared CSG Preview Scene"});',
     )
+    # The CLI uses the output suffix as an identifier when --export-format is
+    # omitted. Register csgp explicitly, not just the preview-scene identifier.
+    replace_once(
+        source / "src/io/export.cc",
+        '    containers->identifierToInfo["stl"] = containers->identifierToInfo["asciistl"];',
+        '    containers->identifierToInfo["stl"] = containers->identifierToInfo["asciistl"];\n'
+        '    containers->identifierToInfo["csgp"] = containers->identifierToInfo["preview-scene"];',
+    )
     replace_once(
         source / "src/io/export.cc",
         "format == FileFormat::ECHO || format == FileFormat::TERM || format == FileFormat::PNG);",
