@@ -3,6 +3,7 @@
 // remain the sole source of preview geometry/Boolean semantics.
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <locale>
@@ -18,6 +19,7 @@
 #include "core/Tree.h"
 #include "geometry/GeometryEvaluator.h"
 #include "geometry/PolySet.h"
+#include "geometry/PolySetUtils.h"
 #include "glview/preview/CSGTreeNormalizer.h"
 
 // The JSON schema is deliberately independent of C++ ABI, pointer values and
@@ -156,8 +158,23 @@ class SceneWriter {
 
   void registerMesh(const std::shared_ptr<const PolySet>& mesh) {
     if (meshIds.count(mesh.get())) return;
+
+    // OpenSCAD F5 leaves can contain quads and concave facets: cube() has
+    // six quads. Reuse upstream's tessellator rather than a fan triangulation
+    // or dropping faces, and cache the triangulated PolySet per shared source.
+    const bool alreadyTriangulated = std::all_of(
+      mesh->indices.begin(), mesh->indices.end(),
+      [](const auto& polygon) { return polygon.size() == 3; });
+    std::shared_ptr<const PolySet> triangles =
+      alreadyTriangulated ? mesh : PolySetUtils::tessellate_faces(*mesh);
+    if (!triangles || triangles->isEmpty())
+      throw std::runtime_error("Official OpenSCAD facet tessellation returned an empty mesh");
+    for (const auto& polygon : triangles->indices) {
+      if (polygon.size() != 3)
+        throw std::runtime_error("Official OpenSCAD facet tessellation returned non-triangular faces");
+    }
     meshIds.emplace(mesh.get(), meshes.size());
-    meshes.push_back(mesh);
+    meshes.push_back(std::move(triangles));
   }
 
   std::map<const CSGLeaf *, size_t> instanceIds;
