@@ -14,15 +14,13 @@ import tempfile
 
 if __package__:
     from .verify_release import ARCHIVE, RELEASE_TAG, SOURCE_COMMIT, SOURCE_TAG, verify
+    from .metadata import release_notes
 else:
     from verify_release import ARCHIVE, RELEASE_TAG, SOURCE_COMMIT, SOURCE_TAG, verify
+    from metadata import release_notes
 
 TITLE = "OpenSCAD Preview Exporter 2026.11-RC0 · macOS ARM64"
-NOTES = (
-    f"Preview Scene schema v1; official source openscad/openscad@{SOURCE_COMMIT} "
-    f"({SOURCE_TAG}). Only macOS ARM64. "
-    "Independent of the OpenSCAD CLI/WASM releases."
-)
+NOTES = release_notes()
 
 
 def gh(*args, check=True):
