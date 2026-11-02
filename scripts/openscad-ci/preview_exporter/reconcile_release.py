@@ -8,6 +8,11 @@ import argparse
 import json
 import os
 import subprocess
+import sys
+from pathlib import Path
+
+# Direct invocation from GitHub Actions must resolve the sibling package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from preview_exporter.metadata import REPOSITORY, release_notes
 from preview_exporter.verify_release import ARCHIVE, RELEASE_TAG, SOURCE_COMMIT
