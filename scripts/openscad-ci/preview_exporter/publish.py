@@ -12,7 +12,10 @@ import subprocess
 import sys
 import tempfile
 
-from verify_release import ARCHIVE, RELEASE_TAG, SOURCE_COMMIT, SOURCE_TAG, verify
+if __package__:
+    from .verify_release import ARCHIVE, RELEASE_TAG, SOURCE_COMMIT, SOURCE_TAG, verify
+else:
+    from verify_release import ARCHIVE, RELEASE_TAG, SOURCE_COMMIT, SOURCE_TAG, verify
 
 TITLE = "OpenSCAD Preview Exporter 2026.11-RC0 · macOS ARM64"
 NOTES = (
