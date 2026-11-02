@@ -10,6 +10,7 @@
 #include <memory>
 #include <ostream>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "core/CSGNode.h"
@@ -71,7 +72,9 @@ class SceneWriter {
              const ProductList& backgrounds) const {
     output.imbue(std::locale::classic());
     output << std::setprecision(17);
-    output << "{\"schemaVersion\":1,\"source\":\"OpenSCAD CSGTreeEvaluator/CSGTreeNormalizer/CSGProducts\"";
+    output << "{\"schemaVersion\":1,\"source\":\"OpenSCAD CSGTreeEvaluator/CSGTreeNormalizer/CSGProducts\""
+           << ",\"upstreamTag\":\"openscad-2026.11-RC0\""
+           << ",\"upstreamCommit\":\"9ba0cee7c94785fac0ca8dfe040b965a12a25ed1\"";
     output << ",\"matrixOrder\":\"row-major\",\"meshes\":[";
     for (size_t i = 0; i < meshes.size(); ++i) {
       if (i) output << ',';
