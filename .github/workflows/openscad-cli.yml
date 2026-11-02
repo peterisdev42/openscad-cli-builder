@@ -1,6 +1,16 @@
 name: Package OpenSCAD CLI
 
 on:
+  # RC0's complete CLI + Preview Exporter release is triggered together by a
+  # deliberately marked merge commit, never by an arbitrary push.
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/openscad-cli.yml
+  pull_request:
+    paths:
+      - .github/workflows/openscad-cli.yml
+      - scripts/openscad-ci/**
   workflow_dispatch:
     inputs:
       source_tag:
@@ -27,6 +37,9 @@ env:
 jobs:
   resolve:
     name: Resolve immutable upstream source
+    if: >-
+      github.event_name != 'push' ||
+      github.event.head_commit.message == 'ci(cli): publish openscad-2026.11-RC0 with Preview Exporter'
     runs-on: ubuntu-24.04
     outputs:
       tag: ${{ steps.source.outputs.tag }}
@@ -40,7 +53,7 @@ jobs:
         id: source
         shell: bash
         env:
-          SELECTED_SOURCE: ${{ inputs.source_tag || 'latest-snapshot' }}
+          SELECTED_SOURCE: ${{ github.event_name != 'workflow_dispatch' && 'openscad-2026.11-RC0' || inputs.source_tag || 'latest-snapshot' }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -94,6 +107,7 @@ jobs:
   build:
     name: ${{ matrix.label }}
     needs: [resolve, validate]
+    if: github.event_name != 'pull_request'
     env:
       OPENSCAD_TAG: ${{ needs.resolve.outputs.tag }}
       OPENSCAD_COMMIT: ${{ needs.resolve.outputs.commit }}
@@ -180,6 +194,19 @@ jobs:
           CCACHE_DIR: ${{ github.workspace }}/.build/ccache
           CCACHE_BASEDIR: ${{ github.workspace }}
         run: python scripts/openscad-ci/build.py
+      - name: Build RC0 Preview Exporter alongside native macOS ARM64 CLI
+        if: matrix.target == 'macos-arm64' && needs.resolve.outputs.tag == 'openscad-2026.11-RC0'
+        env:
+          TARGET: macos-arm64
+          TRIPLET: arm64-osx
+          SCAD_PREVIEW_EXPORTER: '1'
+          SCAD_REUSE_VCPKG: '1'
+          VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.build/vcpkg-cache,readwrite
+          CCACHE_DIR: ${{ github.workspace }}/.build/ccache
+          CCACHE_BASEDIR: ${{ github.workspace }}
+        run: |
+          python scripts/openscad-ci/build.py
+          python scripts/openscad-ci/preview_exporter/verify_release.py dist
       - name: Save dependency cache (including partial builds)
         if: always()
         uses: actions/cache/save@v5
@@ -209,6 +236,7 @@ jobs:
   linux:
     name: ${{ matrix.target }}
     needs: [resolve, validate]
+    if: github.event_name != 'pull_request'
     env:
       OPENSCAD_TAG: ${{ needs.resolve.outputs.tag }}
       OPENSCAD_COMMIT: ${{ needs.resolve.outputs.commit }}
@@ -274,6 +302,7 @@ jobs:
   wasm:
     name: wasm
     needs: [resolve, validate]
+    if: github.event_name != 'pull_request'
     env:
       OPENSCAD_TAG: ${{ needs.resolve.outputs.tag }}
       OPENSCAD_COMMIT: ${{ needs.resolve.outputs.commit }}
@@ -329,6 +358,7 @@ jobs:
   release:
     name: Verify release packages; publish on default branch
     needs: [resolve, build, linux, wasm]
+    if: github.event_name != 'pull_request'
     env:
       OPENSCAD_TAG: ${{ needs.resolve.outputs.tag }}
       OPENSCAD_COMMIT: ${{ needs.resolve.outputs.commit }}
