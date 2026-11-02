@@ -14,6 +14,11 @@ from build import ROOT, SOURCE_COMMIT, SOURCE_TAG, TARGETS, MODERN_SOURCE, packa
 from wasm import WASM_IMAGE, WASM_CAPABILITIES
 from release_metadata import release_channel, with_release_header
 
+# The Preview Exporter is a seventh *asset type*, only for the audited RC0
+# release; it must never alter the published asset lists of other source tags.
+PREVIEW_EXPORTER_SOURCE_TAG = "openscad-2026.11-RC0"
+PREVIEW_EXPORTER_ASSET = "openscad-preview-exporter-macos-arm64.tar.gz"
+
 
 def verify_assets(dist):
     for target in TARGETS:
@@ -56,6 +61,10 @@ def verify_assets(dist):
                               or metadata.get("wasm_image") != WASM_IMAGE
                               or any(metadata.get(key) != value for key, value in WASM_CAPABILITIES.items())))):
             raise RuntimeError(f"Unexpected build metadata: {archive}")
+    if SOURCE_TAG == PREVIEW_EXPORTER_SOURCE_TAG:
+        # A failed or absent exporter must block the *entire* RC0 release.
+        from preview_exporter.verify_release import verify
+        verify(dist)
 
 
 VERSION = SOURCE_TAG.removeprefix("openscad-")
@@ -94,6 +103,8 @@ def release_assets():
     for _, _, target in DOWNLOADS:
         archive = package_name(target) + (".zip" if target.startswith("windows") else ".tar.gz")
         names.extend((archive, archive + ".sha256"))
+    if SOURCE_TAG == PREVIEW_EXPORTER_SOURCE_TAG:
+        names.extend((PREVIEW_EXPORTER_ASSET, PREVIEW_EXPORTER_ASSET + ".sha256"))
     return names
 
 
@@ -103,8 +114,13 @@ def release_notes(repository):
         "| OS | Architectures | Download URL | SHA256 |",
         "| :---: | :---: | :---: | :---: |",
     ]
-    for (system, architecture, _), archive in zip(DOWNLOADS, release_assets()[::2]):
+    for (system, architecture, _), archive in zip(DOWNLOADS, release_assets()[:len(DOWNLOADS) * 2:2]):
         lines.append(f"| {system} | {architecture} | [{archive}]({base}{archive}) | "
+                     f"[{archive}.sha256]({base}{archive}.sha256) |")
+    if SOURCE_TAG == PREVIEW_EXPORTER_SOURCE_TAG:
+        archive = PREVIEW_EXPORTER_ASSET
+        lines.append(f"| macOS (Preview Exporter) | Apple Silicon (ARM64) | "
+                     f"[{archive}]({base}{archive}) | "
                      f"[{archive}.sha256]({base}{archive}.sha256) |")
     if os.environ.get("OPENSCAD_SNAPSHOT") == "true":
         lines.append(f"\nUpstream Development Snapshot: `{VERSION}`; source commit: `{SOURCE_COMMIT}`.")
@@ -126,6 +142,13 @@ def release_notes(repository):
         "or `bin/openscad.exe` (Windows). Linux bundles non-system dependencies "
         "including libstdc++; glibc, the loader and graphics drivers come from the host.\n"
     )
+    if SOURCE_TAG == PREVIEW_EXPORTER_SOURCE_TAG:
+        body += ("\n\nAdditional macOS ARM64 Preview Exporter: "
+                 "run `bin/openscad-preview-exporter -o model.csgp model.scad` "
+                 "to produce Prepared CSG Scene schema v1 using the official "
+                 "OpenSCAD geometry and CSG normalizer. "
+                 "This is a separate archive in this same OpenSCAD release, "
+                 "not a second Release/Tag.")
     channel = release_channel(SOURCE_TAG, snapshot=os.environ.get("OPENSCAD_SNAPSHOT") == "true")
     return with_release_header(body, VERSION, channel, SOURCE_COMMIT,
                                snapshot_url=os.environ.get("OPENSCAD_SNAPSHOT_URL") or None)

@@ -58,14 +58,15 @@ class PackagingTests(unittest.TestCase):
     def test_release_table_links_cover_exactly_six_packages_and_checksums(self):
         import re
         assets = release_assets()
-        self.assertEqual(len(assets), 12)
-        self.assertEqual(len(set(assets)), 12)
+        expected_count = 14 if SOURCE_TAG == 'openscad-2026.11-RC0' else 12
+        self.assertEqual(len(assets), expected_count)
+        self.assertEqual(len(set(assets)), expected_count)
         self.assertNotIn('SHA256SUMS', assets)
         self.assertFalse(any('source' in name for name in assets))
         notes = release_notes('example/builder')
         links = re.findall(r'\[([^]]+)\]\(([^)]+)\)', notes)
         urls = [url for _, url in links]
-        self.assertEqual(len(urls), 12)
+        self.assertEqual(len(urls), expected_count)
         base = f'https://github.com/example/builder/releases/download/{RELEASE_TAG}/'
         self.assertEqual({url.removeprefix(base) for url in urls}, set(assets))
         self.assertTrue(all(url.startswith(base) for url in urls))
@@ -346,7 +347,10 @@ class PackagingTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Unexpected build metadata'):
                 verify_assets(dist)
 
-    def test_release_gate_requires_all_architectures_and_valid_checksums(self):
+    @mock.patch('preview_exporter.verify_release.verify')
+    def test_release_gate_requires_all_architectures_and_valid_checksums(self, exporter_verify):
+        # This fixture builds only synthetic CLI packages; the real Preview
+        # Exporter archive has its own strict tests and RC0 release gate.
         with tempfile.TemporaryDirectory() as directory:
             dist = Path(directory)
             with self.assertRaises(FileNotFoundError):
@@ -358,6 +362,8 @@ class PackagingTests(unittest.TestCase):
                 'openscad-cli-wasm.tar.gz',
             })
             verify_assets(dist)
+            if SOURCE_TAG == 'openscad-2026.11-RC0':
+                exporter_verify.assert_called_once_with(dist)
             windows_arm64 = dist / 'openscad-cli-windows-x86_64.zip'
             content = windows_arm64.read_bytes()
             windows_arm64.unlink()
