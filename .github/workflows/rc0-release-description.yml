@@ -1,0 +1,48 @@
+name: Update unified OpenSCAD RC0 Release description
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/rc0-release-description.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rc0-release-description
+  cancel-in-progress: false
+
+jobs:
+  update-description:
+    name: Validate and update RC0 metadata (no rebuild)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.head_commit.message == 'docs(release): update RC0 description'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      OPENSCAD_TAG: openscad-2026.11-RC0
+      OPENSCAD_COMMIT: 9ba0cee7c94785fac0ca8dfe040b965a12a25ed1
+      OPENSCAD_SNAPSHOT: 'false'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Test Release table, YAML metadata and asset-preserving update
+        run: python3 -m unittest discover -s scripts/openscad-ci -p 'test_rc0_release_description.py' -v
+      - name: Inspect existing 14-asset Release description
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/openscad-ci/reconcile_rc0_release.py
+      - name: Update Release body only and verify assets unchanged
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/openscad-ci/reconcile_rc0_release.py --apply
+      - name: Recheck idempotence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/openscad-ci/reconcile_rc0_release.py --apply

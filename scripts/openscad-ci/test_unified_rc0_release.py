@@ -35,7 +35,15 @@ class UnifiedReleaseTests(unittest.TestCase):
             self.assertIn("  commit: " + release.SOURCE_COMMIT, body)
             self.assertIn("/releases/download/openscad-2026.11-RC0/" + EXPORTER_ARCHIVE, body)
             self.assertEqual(body.count(EXPORTER_ARCHIVE + "]("), 1)
-            self.assertIn("| macOS (Preview Exporter) | Apple Silicon (ARM64) |", body)
+            self.assertIn(
+                f"| macOS | Apple Silicon | [openscad-preview-exporter-macos-arm64.tar.gz]",
+                body,
+            )
+            self.assertNotIn("macOS (Preview Exporter)", body)
+            self.assertNotIn("Apple Silicon (ARM64)", body)
+            self.assertIn("alongside the six standard CLI packages", body)
+            self.assertIn("does not perform final OpenCSG rendering", body)
+            self.assertEqual(body.count("| macOS | Apple Silicon |"), 2)
 
     def test_missing_or_invalid_exporter_blocks_all_rc0_packages(self):
         with tempfile.TemporaryDirectory() as tmp, \

@@ -1,4 +1,6 @@
-name: Package OpenSCAD CLI
+name: Build and Release OpenSCAD CLI
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch' && inputs.source_tag || 'openscad-2026.11-RC0' }}${{ (github.event_name != 'workflow_dispatch' || inputs.source_tag == 'openscad-2026.11-RC0') && ' · CLI + macOS ARM64 Preview Exporter' || ' · CLI packages' }}
 
 on:
   # Explicit RC0 release trigger: this main-branch workflow update rebuilds
@@ -195,7 +197,7 @@ jobs:
           CCACHE_DIR: ${{ github.workspace }}/.build/ccache
           CCACHE_BASEDIR: ${{ github.workspace }}
         run: python scripts/openscad-ci/build.py
-      - name: Build RC0 Preview Exporter alongside native macOS ARM64 CLI
+      - name: Build additional macOS ARM64 Preview Exporter for RC0
         if: matrix.target == 'macos-arm64' && needs.resolve.outputs.tag == 'openscad-2026.11-RC0'
         env:
           TARGET: macos-arm64
@@ -357,7 +359,7 @@ jobs:
           if-no-files-found: ignore
 
   release:
-    name: Verify release packages; publish on default branch
+    name: Verify all CLI and RC0 Preview Exporter assets; publish Release
     needs: [resolve, build, linux, wasm]
     if: github.event_name != 'pull_request'
     env:
@@ -389,9 +391,9 @@ jobs:
           pattern: openscad-cli-*
           path: dist
           merge-multiple: true
-      - name: Verify release assets and prepare notes
+      - name: Verify complete release assets and generate unified Release notes
         run: python3 scripts/openscad-ci/release.py
-      - name: Publish all verified packages
+      - name: Publish complete CLI Release (including RC0 Preview Exporter)
         # Branch builds exercise the full package gate without publishing.
         if: github.ref_name == github.event.repository.default_branch
         env:
