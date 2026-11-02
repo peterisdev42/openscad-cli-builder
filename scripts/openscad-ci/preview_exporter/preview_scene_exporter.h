@@ -165,8 +165,10 @@ class SceneWriter {
     const bool alreadyTriangulated = std::all_of(
       mesh->indices.begin(), mesh->indices.end(),
       [](const auto& polygon) { return polygon.size() == 3; });
-    std::shared_ptr<const PolySet> triangles =
-      alreadyTriangulated ? mesh : PolySetUtils::tessellate_faces(*mesh);
+    std::shared_ptr<const PolySet> triangles = mesh;
+    if (!alreadyTriangulated) {
+      triangles = std::shared_ptr<const PolySet>(PolySetUtils::tessellate_faces(*mesh));
+    }
     if (!triangles || triangles->isEmpty())
       throw std::runtime_error("Official OpenSCAD facet tessellation returned an empty mesh");
     for (const auto& polygon : triangles->indices) {
