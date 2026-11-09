@@ -115,16 +115,19 @@ def publish(dist, notes, repository):
     existing = next((r for page in releases for r in page if r["tag_name"] == RELEASE_TAG), None)
     files = [str(dist / name) for name in assets]
     common = ["--repo", repository]
+    # The newer supported CLI version is Latest, even when historical releases
+    # are rebuilt and published after it.
+    latest_arg = "--latest" if MODERN_SOURCE else "--latest=false"
     if existing:
         subprocess.check_call(["gh", "release", "upload", RELEASE_TAG, *files, "--clobber", *common])
         subprocess.check_call(["gh", "release", "edit", RELEASE_TAG, "--title", RELEASE_TITLE,
-                               "--notes-file", str(notes), *common])
+                               "--notes-file", str(notes), latest_arg, *common])
     else:
         # A moving branch ref remains publishable if main advances during the build.
         # The package build-info.json records the actual immutable builder commit.
         subprocess.check_call(["gh", "release", "create", RELEASE_TAG, *files,
                                "--target", os.environ["GITHUB_REF_NAME"], "--title", RELEASE_TITLE,
-                               "--notes-file", str(notes), "--latest=false", *common])
+                               "--notes-file", str(notes), latest_arg, *common])
     current = json.loads(subprocess.check_output(
         ["gh", "api", f"repos/{repository}/releases/tags/{RELEASE_TAG}"], text=True))
     uploaded = {a["name"] for a in current["assets"]}
