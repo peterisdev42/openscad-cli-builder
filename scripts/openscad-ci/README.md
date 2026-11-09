@@ -13,22 +13,21 @@
 
 Windows 仅构建 x64，使用 VS 2022，随包提供 Mesa 24.3.4 softpipe 和 MSVC 运行库。Linux 两种架构均在原生 Ubuntu 22.04 runner 上使用 GCC 11 构建，glibc 基线为 2.35；WASM 保留单个 Node.js 打包任务。
 Windows 使用 `bin/openscad.exe`，其余参数与 macOS 相同。
-工作流为 `.github/workflows/openscad-cli.yml`（**Package OpenSCAD CLI**）。
+工作流为 `.github/workflows/openscad-cli.yml`（**Build and Release OpenSCAD CLI**）。
 构建采用手动 `Run workflow`；`source_tag` 可以选择 `latest-snapshot`（默认）、
-`openscad-2026.10-TEST4` 或 `openscad-2021.01`。快照模式直接读取官网
+`openscad-2026.11-RC0`、`openscad-2026.10-TEST4` 或 `openscad-2021.01`。快照模式直接读取官网
 `.snapshots.js`，下载 Linux x64 AppImage 验证 SHA256，解析 `--info` 中的 Git Commit，
 再将同一完整源码 SHA 用于六种架构构建。无法确认上游源码时直接停止，不猜测 master。
 构建来源为官方 `openscad/openscad`；两个固定 Tag 仍保留原 Fork 和固定的源码 SHA。
 Development Snapshot 版本的 Release Tag 为 `openscad-YYYY.MM.DD`，标题为 `YYYY.MM.DD`。
 
-其他分支只上传 Actions artifacts；默认分支五种原生目标和 WASM 打包均通过后，创建或更新
-与所选源码版本对应的 `openscad-cli-<version>` GitHub Release，标题为 `OpenSCAD CLI <version>`，同名附件会被替换。
+Pull Request 只运行源码解析和单元测试，不编译或发布 Release。手动运行时，
+六种 CLI 目标构建与校验均通过后，默认分支创建或更新与上游源码 Tag 相同的
+GitHub Release（`openscad-...`），标题按上游提交日期生成，同名附件会被替换。
 使用仓库内置 `GITHUB_TOKEN`，发布 job 具有 `contents: write` 权限。
 Release 正文顶部包含 schemaVersion=1 的 YAML 代码块，记录版本、渠道、官方 OpenSCAD Commit，
 并保留原有下载表格。Stable 为 `prerelease=false` 且标记 Latest；
 RC、TEST、Snapshot 为 `prerelease=true` 且不标记 Latest。
-历史 Release 的元数据可通过独立的 `Reconcile Release Metadata` 工作流更新，
-该工作流不编译或修改任何打包附件。
 创建 Release 时以默认分支名为目标，避免构建期间分支前进后，对旧工作流提交创建标签触发 403。
 Release 标签作为下载入口；实际构建脚本提交以每个包内的 `build-info.json` 为准。
 同一分支有新提交时，自动取消旧轮次，只验证最新版本。
@@ -38,8 +37,8 @@ Release 标签作为下载入口；实际构建脚本提交以每个包内的 `b
 
 ## 固定源码和依赖
 
-- 默认源码 Tag：`openscad-2026.10-TEST4`，固定提交
-  `5a864f17b6b022904004704f64e6168d2cfb8435`。
+- `workflow_dispatch` 默认选择 `latest-snapshot`；PR 验证固定使用 `openscad-2026.11-RC0`。
+  `openscad-2026.10-TEST4` 对应固定提交 `5a864f17b6b022904004704f64e6168d2cfb8435`。
   递归检出并归档该提交固定的全部子模块，包含 MCAD、Clipper2 和 Manifold。
   使用上游 `OpenSCADExe` 目标及依赖发现，保持 CGAL 和 Manifold 两个后端；
   关闭 GUI、内置 Python、mimalloc 和 GUI 输入设备驱动；Linux 启用系统 lib3mf，macOS/Windows 关闭可选 3MF。
@@ -101,7 +100,7 @@ MSVC CRT 版本匹配编译工具集，按照实际导入递归收集，避免�
 4. TEST4 使用中文文件名验证参数编码，额外导出 Manifold 渲染 PNG，验证新后端。
 5. `--info` 确认离屏 OpenGL 可用，无资源丢失或渲染错误。
 
-五种原生包与 WASM 包全部通过后，Release 校验其 SHA-256 和构建元数据，仅发布六种运行时包及其逐包 SHA256 校验文件，共 12 个附件。
+五种原生包与 WASM 包全部通过后，Release 校验其 SHA-256 和构建元数据；常规版本发布六种 CLI 归档及校验文件，共 12 个附件。`openscad-2026.11-RC0` 额外发布 macOS ARM64 Preview Exporter 与校验文件，共 14 个附件。
 发布步骤不生成或上传源码压缩包。
 正文提供六种目标的下载和 SHA256 链接表格，链接文字使用对应 Assets 文件名，并附简要构建参数说明。
 Linux 明确声明 glibc 2.35+ 基线，并检查包内所有 ELF 的 GLIBC 符号版本；macOS 的最低系统版本仍需实际机器验证。
