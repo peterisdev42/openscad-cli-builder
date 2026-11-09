@@ -1,0 +1,284 @@
+name: Package OpenSCAD CLI
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: OpenSCAD source tag to build and release
+        type: choice
+        default: openscad-2026.10-TEST4
+        options:
+          - openscad-2026.10-TEST4
+          - openscad-2021.01
+  push:
+    paths:
+      - .github/workflows/openscad-cli.yml
+      - scripts/openscad-ci/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openscad-cli-${{ github.ref }}-${{ inputs.source_tag || 'openscad-2026.10-TEST4' }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: '1'
+  OPENSCAD_TAG: ${{ inputs.source_tag || 'openscad-2026.10-TEST4' }}
+  OPENSCAD_COMMIT: ${{ inputs.source_tag == 'openscad-2021.01' && '41f58fe57c03457a3a8b4dc541ef5654ec3e8c78' || '5a864f17b6b022904004704f64e6168d2cfb8435' }}
+  VCPKG_COMMIT: 6f7ffeb18f99796233b958aaaf14ec7bd4fb64b2
+
+jobs:
+  validate:
+    name: Validate packaging and release gates
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: peterisdev42/openscad
+          ref: ${{ env.OPENSCAD_TAG }}
+          path: sources/openscad
+      - run: python3 -m unittest discover -s scripts/openscad-ci -p 'test_*.py' -v
+
+  build:
+    name: ${{ matrix.label }}
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: macos-x64, label: darwin-x64, runner: macos-26-intel, triplet: x64-osx }
+          - { target: macos-arm64, label: darwin-arm64, runner: macos-latest, triplet: arm64-osx }
+          - { target: windows-x64, label: win32-x64, runner: windows-2022, triplet: x64-windows, arch: x64 }
+    steps:
+      - uses: actions/checkout@v5
+      # Fetch only OpenSCAD and its pinned submodules, not the builder's other sources.
+      - uses: actions/checkout@v5
+        with:
+          repository: peterisdev42/openscad
+          ref: ${{ env.OPENSCAD_TAG }}
+          path: sources/openscad
+          submodules: recursive
+      - name: Verify immutable source revision
+        shell: bash
+        run: |
+          actual_commit=$(git -C sources/openscad rev-parse 'HEAD^{commit}')
+          echo "Expected source commit: $OPENSCAD_COMMIT"
+          echo "Checked-out source commit: $actual_commit"
+          test "$actual_commit" = "$OPENSCAD_COMMIT"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          architecture: ${{ runner.os == 'macOS' && runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+      - name: Select and report the image's default Xcode toolchain
+        if: runner.os == 'macOS'
+        run: |
+          sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+          echo "CC=$(xcrun --find clang)" >> "$GITHUB_ENV"
+          echo "CXX=$(xcrun --find clang++)" >> "$GITHUB_ENV"
+          sw_vers
+          uname -m
+          xcode-select --print-path
+          xcodebuild -version
+          xcrun clang++ --version
+      - name: Install macOS build tools
+        if: runner.os == 'macOS'
+        run: |
+          brew install bison flex pkg-config autoconf autoconf-archive automake libtool ccache gettext
+          {
+            echo "$(brew --prefix bison)/bin"
+            echo "$(brew --prefix flex)/bin"
+            echo "$(brew --prefix gettext)/bin"
+          } >> "$GITHUB_PATH"
+          echo "ACLOCAL_PATH=$(brew --prefix)/share/aclocal" >> "$GITHUB_ENV"
+      - name: Initialize Windows compiler environment
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          BUILD_ARCH: ${{ matrix.arch }}
+        run: ./scripts/openscad-ci/windows-tools.ps1
+      - name: Install pinned build tools
+        run: python -m pip install cmake==3.31.6 ninja==1.11.1.3 meson==1.7.0 Mako==1.3.9 PyYAML==6.0.2 packaging==24.2
+      - uses: actions/checkout@v5
+        with:
+          repository: microsoft/vcpkg
+          ref: 6f7ffeb18f99796233b958aaaf14ec7bd4fb64b2
+          path: .build/vcpkg
+      - uses: actions/cache/restore@v5
+        id: dependency-cache
+        with:
+          path: |
+            .build/vcpkg-cache
+            .build/ccache
+          key: openscad-deps-v2-${{ matrix.target }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('scripts/openscad-ci/vcpkg.json', 'scripts/openscad-ci/triplets/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            openscad-deps-v2-${{ matrix.target }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('scripts/openscad-ci/vcpkg.json', 'scripts/openscad-ci/triplets/**') }}-
+            openscad-deps-v2-${{ matrix.target }}-${{ env.VCPKG_COMMIT }}-
+      - name: Build dependencies and CLI; test relocated package
+        env:
+          TARGET: ${{ matrix.target }}
+          TRIPLET: ${{ matrix.triplet }}
+          VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.build/vcpkg-cache,readwrite
+          CCACHE_DIR: ${{ github.workspace }}/.build/ccache
+          CCACHE_BASEDIR: ${{ github.workspace }}
+        run: python scripts/openscad-ci/build.py
+      - name: Save dependency cache (including partial builds)
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            .build/vcpkg-cache
+            .build/ccache
+          key: ${{ steps.dependency-cache.outputs.cache-primary-key }}
+      - uses: actions/upload-artifact@v6
+        with:
+          name: openscad-cli-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: logs-${{ matrix.target }}
+          include-hidden-files: true
+          path: |
+            dist/*
+            .build/**/*.log
+            .build/**/CMakeCache.txt
+          if-no-files-found: ignore
+
+  linux:
+    name: ${{ matrix.target }}
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64, runner: ubuntu-22.04 }
+          - { target: linux-arm64, runner: ubuntu-22.04-arm }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: peterisdev42/openscad
+          ref: ${{ env.OPENSCAD_TAG }}
+          path: sources/openscad
+          submodules: recursive
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          architecture: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+      - name: Install pinned build tools
+        run: python -m pip install cmake==3.31.6 ninja==1.11.1.3
+      - uses: actions/cache/restore@v5
+        id: linux-cache
+        with:
+          path: .build/ccache
+          key: openscad-linux-v1-${{ matrix.target }}-${{ env.OPENSCAD_TAG }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: openscad-linux-v1-${{ matrix.target }}-${{ env.OPENSCAD_TAG }}-
+      - name: Build glibc CLI and relocated archive
+        env:
+          TARGET: ${{ matrix.target }}
+          CCACHE_DIR: ${{ github.workspace }}/.build/ccache
+          CCACHE_BASEDIR: ${{ github.workspace }}
+        run: bash scripts/openscad-ci/linux.sh
+      - uses: actions/cache/save@v5
+        if: always()
+        with:
+          path: .build/ccache
+          key: ${{ steps.linux-cache.outputs.cache-primary-key }}
+      - uses: actions/upload-artifact@v6
+        with:
+          name: openscad-cli-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload Linux diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: logs-${{ matrix.target }}
+          include-hidden-files: true
+          path: |
+            dist/*
+            .build/**/*.log
+            .build/**/CMakeCache.txt
+          if-no-files-found: ignore
+
+  wasm:
+    name: wasm
+    needs: validate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: peterisdev42/openscad
+          ref: ${{ env.OPENSCAD_TAG }}
+          path: sources/openscad
+          submodules: recursive
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - uses: actions/cache/restore@v5
+        id: wasm-cache
+        with:
+          path: .build/wasm-ccache
+          key: openscad-wasm-v1-${{ env.OPENSCAD_TAG }}-${{ hashFiles('scripts/openscad-ci/wasm*') }}-${{ github.run_id }}
+          restore-keys: openscad-wasm-v1-${{ env.OPENSCAD_TAG }}-
+      - name: Build pinned WASM and test relocated Node package
+        run: python scripts/openscad-ci/wasm.py
+      - uses: actions/cache/save@v5
+        if: always()
+        with:
+          path: .build/wasm-ccache
+          key: ${{ steps.wasm-cache.outputs.cache-primary-key }}
+      - uses: actions/upload-artifact@v6
+        with:
+          name: openscad-cli-wasm
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload WASM diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: logs-wasm
+          include-hidden-files: true
+          path: |
+            dist/*
+            .build/wasm/**/*.log
+            .build/wasm/**/CMakeCache.txt
+          if-no-files-found: ignore
+
+  release:
+    name: Verify release packages; publish on default branch
+    needs: [build, linux, wasm]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: openscad-cli-*
+          path: dist
+          merge-multiple: true
+      - name: Verify release assets and prepare notes
+        run: python3 scripts/openscad-ci/release.py
+      - name: Publish all verified packages
+        # Branch builds exercise the full package gate without publishing.
+        if: github.ref_name == github.event.repository.default_branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/openscad-ci/release.py --publish

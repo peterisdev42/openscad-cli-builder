@@ -1,0 +1,3 @@
+[submodule "sources/openscad"]
+	path = sources/openscad
+	url = https://github.com/peterisdev42/openscad.git
