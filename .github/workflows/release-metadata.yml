@@ -1,0 +1,28 @@
+name: Reconcile Release Metadata
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-metadata.yml
+      - scripts/openscad-ci/release_metadata.py
+      - scripts/openscad-ci/sync_release_metadata.py
+      - scripts/openscad-ci/test_release_metadata.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile:
+    name: Update existing Release descriptions and flags only
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Test release metadata rules
+        run: python3 -m unittest discover -s scripts/openscad-ci -p 'test_release_metadata.py' -v
+      - name: Update existing GitHub Releases without touching assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/openscad-ci/sync_release_metadata.py --apply

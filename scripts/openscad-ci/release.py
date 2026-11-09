@@ -12,6 +12,7 @@ import zipfile
 
 from build import ROOT, SOURCE_COMMIT, SOURCE_TAG, TARGETS, MODERN_SOURCE, package_name, LINUX_GLIBC_BASELINE
 from wasm import WASM_IMAGE, WASM_CAPABILITIES
+from release_metadata import release_channel, with_release_header
 
 
 def verify_assets(dist):
@@ -109,7 +110,7 @@ def release_notes(repository):
         lines.append(f"\nUpstream Development Snapshot: `{VERSION}`; source commit: `{SOURCE_COMMIT}`.")
         if os.environ.get("OPENSCAD_SNAPSHOT_URL"):
             lines.append(f"Official snapshot: {os.environ['OPENSCAD_SNAPSHOT_URL']}")
-    return "\n".join(lines) + (
+    body = "\n".join(lines) + (
         f"\n\nNative OpenSCAD `{VERSION}` · `HEADLESS=ON` · `NULLGL=OFF`. "
         f"OpenGL, OpenCSG, CGAL{', Manifold' if MODERN_SOURCE else ''} enabled; "
         "Qt GUI disabled. 3MF I/O is enabled on Linux and disabled on macOS/Windows. "
@@ -125,6 +126,9 @@ def release_notes(repository):
         "or `bin/openscad.exe` (Windows). Linux bundles non-system dependencies "
         "including libstdc++; glibc, the loader and graphics drivers come from the host.\n"
     )
+    channel = release_channel(SOURCE_TAG, snapshot=os.environ.get("OPENSCAD_SNAPSHOT") == "true")
+    return with_release_header(body, VERSION, channel, SOURCE_COMMIT,
+                               snapshot_url=os.environ.get("OPENSCAD_SNAPSHOT_URL") or None)
 
 
 def publish(dist, notes, repository):
@@ -142,17 +146,21 @@ def publish(dist, notes, repository):
     common = ["--repo", repository]
     # The newer supported CLI version is Latest, even when historical releases
     # are rebuilt and published after it.
-    latest_arg = "--latest" if MODERN_SOURCE else "--latest=false"
+    channel = release_channel(SOURCE_TAG, snapshot=os.environ.get("OPENSCAD_SNAPSHOT") == "true")
+    prerelease = channel != "stable"
+    latest_arg = "--latest" if not prerelease else "--latest=false"
     if existing:
         subprocess.check_call(["gh", "release", "upload", RELEASE_TAG, *files, "--clobber", *common])
         subprocess.check_call(["gh", "release", "edit", RELEASE_TAG, "--title", title,
-                               "--notes-file", str(notes), latest_arg, *common])
+                               "--notes-file", str(notes), latest_arg,
+                               "--prerelease" if prerelease else "--prerelease=false", *common])
     else:
         # A moving branch ref remains publishable if main advances during the build.
         # The package build-info.json records the actual immutable builder commit.
         subprocess.check_call(["gh", "release", "create", RELEASE_TAG, *files,
                                "--target", os.environ["GITHUB_REF_NAME"], "--title", title,
-                               "--notes-file", str(notes), latest_arg, *common])
+                               "--notes-file", str(notes), latest_arg,
+                               *(["--prerelease"] if prerelease else []), *common])
     current = json.loads(subprocess.check_output(
         ["gh", "api", f"repos/{repository}/releases/tags/{RELEASE_TAG}"], text=True))
     uploaded = {a["name"] for a in current["assets"]}

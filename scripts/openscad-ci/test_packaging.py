@@ -73,6 +73,12 @@ class PackagingTests(unittest.TestCase):
         self.assertTrue(all(url == base + name for name, url in links))
         self.assertNotIn('Compatibility', notes)
 
+    def test_release_notes_include_channel_metadata(self):
+        notes = release_notes("example/builder")
+        self.assertTrue(notes.startswith("```yaml\nschemaVersion: 1\n"))
+        self.assertIn("commit: " + SOURCE_COMMIT, notes)
+        self.assertIn("channel: ", notes)
+
     def test_new_release_targets_branch_when_build_commit_is_no_longer_head(self):
         with tempfile.TemporaryDirectory() as directory:
             dist = Path(directory)
