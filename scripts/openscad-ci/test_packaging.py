@@ -14,11 +14,27 @@ import zipfile
 from build import (ROOT, SOURCE_COMMIT, SOURCE_TAG, TARGETS, NATIVE_TARGETS, check_architecture,
                    patch_source, patch_legacy_source, patch_modern_source, MODERN_SOURCE, package_name, verify_runtime_dependencies)
 from build import smoke_test, copy_windows_runtime
-from release import verify_assets, release_assets, release_notes, publish, RELEASE_TAG
+from release import verify_assets, release_assets, release_notes, publish, RELEASE_TAG, release_title_from_commit
 from wasm import WASM_IMAGE, WASM_CAPABILITIES
 
 
 class PackagingTests(unittest.TestCase):
+    def test_release_tag_matches_source_tag(self):
+        self.assertEqual(RELEASE_TAG, SOURCE_TAG)
+
+    def test_release_titles_from_commit_date(self):
+        cases = (
+            ("openscad-2021.01", "2021-01-31T17:41:09+00:00", "2021.01.31"),
+            ("openscad-2026.10-TEST4", "2026-10-15T02:45:40Z", "2026.10.15-TEST4"),
+            ("openscad-2026.10-RC1", "2026-10-15T02:45:40Z", "2026.10.15-RC1"),
+            ("openscad-2026.10.15-snapshot", "2026-10-15T23:45:40-04:00", "2026.10.16-snapshot"),
+        )
+        for tag, date, expected in cases:
+            with self.subTest(tag=tag):
+                self.assertEqual(release_title_from_commit(tag, date), expected)
+        with self.assertRaisesRegex(ValueError, "Missing"):
+            release_title_from_commit("openscad-2021.01", None)
+
     def test_smoke_preserves_version_failure_diagnostics(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -55,7 +71,7 @@ class PackagingTests(unittest.TestCase):
             for name in release_assets():
                 (dist / name).touch()
             current = {'assets': [{'name': name, 'id': i} for i, name in enumerate(release_assets())]}
-            with mock.patch.dict(os.environ, {'GITHUB_REF_NAME': 'main', 'GITHUB_SHA': 'old-build-commit'}), mock.patch(
+            with mock.patch.dict(os.environ, {'GITHUB_REF_NAME': 'main', 'GITHUB_SHA': 'old-build-commit', 'OPENSCAD_SOURCE_COMMIT_DATE': '2026-10-15T02:45:40Z'}), mock.patch(
                     'release.verify_assets'), mock.patch('release.subprocess.check_output',
                     side_effect=[json.dumps([[]]), json.dumps(current)]), mock.patch(
                     'release.subprocess.check_call') as command:
@@ -73,7 +89,7 @@ class PackagingTests(unittest.TestCase):
             existing = {'tag_name': RELEASE_TAG}
             current = {'assets': [{'name': name, 'id': i} for i, name in enumerate(release_assets())]
                        + [{'name': 'openscad-cli-2021.01-source.tar.gz', 'id': 99}]}
-            with mock.patch('release.verify_assets'), mock.patch(
+            with mock.patch.dict(os.environ, {'OPENSCAD_SOURCE_COMMIT_DATE': '2026-10-15T02:45:40Z'}), mock.patch('release.verify_assets'), mock.patch(
                     'release.subprocess.check_output', side_effect=[json.dumps([[existing]]), json.dumps(current)]), mock.patch(
                     'release.subprocess.check_call') as command:
                 publish(dist, dist / 'notes.md', 'example/builder')
@@ -81,7 +97,7 @@ class PackagingTests(unittest.TestCase):
                 self.assertEqual(calls[-1], ['gh', 'api', '--method', 'DELETE',
                                             'repos/example/builder/releases/assets/99'])
                 self.assertNotIn(str(dist / 'openscad-cli-2021.01-source.tar.gz'), calls[0])
-            with mock.patch('release.verify_assets'), mock.patch(
+            with mock.patch.dict(os.environ, {'OPENSCAD_SOURCE_COMMIT_DATE': '2026-10-15T02:45:40Z'}), mock.patch('release.verify_assets'), mock.patch(
                     'release.subprocess.check_output', return_value=json.dumps([[existing]])), mock.patch(
                     'release.subprocess.check_call', side_effect=subprocess.CalledProcessError(1, 'gh')) as command:
                 with self.assertRaises(subprocess.CalledProcessError):

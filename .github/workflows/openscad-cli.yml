@@ -269,6 +269,20 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: peterisdev42/openscad
+          ref: ${{ env.OPENSCAD_TAG }}
+          path: sources/openscad
+      - name: Determine OpenSCAD source commit date (UTC)
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual=$(git -C sources/openscad rev-parse 'HEAD^{commit}')
+          test "$actual" = "$OPENSCAD_COMMIT"
+          commit_date=$(git -C sources/openscad show -s --format=%cI "$OPENSCAD_COMMIT")
+          test -n "$commit_date"
+          echo "OPENSCAD_SOURCE_COMMIT_DATE=$commit_date" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v7
         with:
           pattern: openscad-cli-*
