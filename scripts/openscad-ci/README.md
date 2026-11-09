@@ -14,8 +14,13 @@
 Windows 仅构建 x64，使用 VS 2022，随包提供 Mesa 24.3.4 softpipe 和 MSVC 运行库。Linux 两种架构均在原生 Ubuntu 22.04 runner 上使用 GCC 11 构建，glibc 基线为 2.35；WASM 保留单个 Node.js 打包任务。
 Windows 使用 `bin/openscad.exe`，其余参数与 macOS 相同。
 工作流为 `.github/workflows/openscad-cli.yml`（**Package OpenSCAD CLI**）。
-默认分支修改工作流或 `scripts/openscad-ci/` 后自动构建 `openscad-2026.10-TEST4`。
-手动 Run workflow 可通过 `source_tag` 选择 `openscad-2026.10-TEST4` 或 `openscad-2021.01`。
+构建采用手动 `Run workflow`；`source_tag` 可以选择 `latest-snapshot`（默认）、
+`openscad-2026.10-TEST4` 或 `openscad-2021.01`。快照模式直接读取官网
+`.snapshots.js`，下载 Linux x64 AppImage 验证 SHA256，解析 `--info` 中的 Git Commit，
+再将同一完整源码 SHA 用于六种架构构建。无法确认上游源码时直接停止，不猜测 master。
+构建来源为官方 `openscad/openscad`；两个固定 Tag 仍保留原 Fork 和固定的源码 SHA。
+Development Snapshot 版本的 Release Tag 为 `openscad-YYYY.MM.DD`，标题为 `YYYY.MM.DD`。
+
 其他分支只上传 Actions artifacts；默认分支五种原生目标和 WASM 打包均通过后，创建或更新
 与所选源码版本对应的 `openscad-cli-<version>` GitHub Release，标题为 `OpenSCAD CLI <version>`，同名附件会被替换。
 使用仓库内置 `GITHUB_TOKEN`，发布 job 具有 `contents: write` 权限。

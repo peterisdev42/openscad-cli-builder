@@ -7,7 +7,7 @@ import tarfile
 import tempfile
 import unittest
 
-from build import ROOT, SOURCE_TAG, MODERN_SOURCE
+from build import ROOT, SOURCE_TAG, SOURCE_COMMIT, MODERN_SOURCE
 from wasm import patch_wasm_source
 import test_packaging
 from release import verify_assets
@@ -15,7 +15,7 @@ from release import verify_assets
 
 class WasmTests(unittest.TestCase):
     def test_wasm_patch_applies_to_selected_real_source_without_native_patches(self):
-        archive = subprocess.check_output(['git', '-C', str(ROOT / 'sources/openscad'), 'archive', SOURCE_TAG])
+        archive = subprocess.check_output(['git', '-C', str(ROOT / 'sources/openscad'), 'archive', SOURCE_COMMIT])
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory)
             with tarfile.open(fileobj=io.BytesIO(archive)) as stream:

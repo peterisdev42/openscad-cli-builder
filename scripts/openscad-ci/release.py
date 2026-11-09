@@ -66,6 +66,10 @@ def release_title_from_commit(tag, commit_date):
     match = re.fullmatch(r"openscad-\d{4}\.\d{1,2}(?:\.\d{1,2})?(?:-([A-Za-z][A-Za-z0-9.-]*))?", tag)
     if match is None:
         raise ValueError(f"Unsupported OpenSCAD source tag format: {tag!r}")
+    if os.environ.get("OPENSCAD_SNAPSHOT") == "true":
+        if not re.fullmatch(r"openscad-\d{4}\.\d{2}\.\d{2}", tag):
+            raise ValueError("Snapshot release must have a YYYY.MM.DD version")
+        return tag.removeprefix("openscad-")
     if not commit_date:
         raise ValueError("Missing OPENSCAD_SOURCE_COMMIT_DATE; refusing to publish")
     moment = datetime.fromisoformat(commit_date.replace("Z", "+00:00"))
@@ -101,6 +105,10 @@ def release_notes(repository):
     for (system, architecture, _), archive in zip(DOWNLOADS, release_assets()[::2]):
         lines.append(f"| {system} | {architecture} | [{archive}]({base}{archive}) | "
                      f"[{archive}.sha256]({base}{archive}.sha256) |")
+    if os.environ.get("OPENSCAD_SNAPSHOT") == "true":
+        lines.append(f"\nUpstream Development Snapshot: `{VERSION}`; source commit: `{SOURCE_COMMIT}`.")
+        if os.environ.get("OPENSCAD_SNAPSHOT_URL"):
+            lines.append(f"Official snapshot: {os.environ['OPENSCAD_SNAPSHOT_URL']}")
     return "\n".join(lines) + (
         f"\n\nNative OpenSCAD `{VERSION}` · `HEADLESS=ON` · `NULLGL=OFF`. "
         f"OpenGL, OpenCSG, CGAL{', Manifold' if MODERN_SOURCE else ''} enabled; "

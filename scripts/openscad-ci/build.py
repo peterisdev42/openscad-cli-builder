@@ -21,7 +21,9 @@ SOURCE_REVISIONS = {
     "openscad-2026.10-TEST4": "5a864f17b6b022904004704f64e6168d2cfb8435",
 }
 SOURCE_TAG = os.environ.get("OPENSCAD_TAG", "openscad-2026.10-TEST4")
-SOURCE_COMMIT = SOURCE_REVISIONS[SOURCE_TAG]
+SOURCE_COMMIT = os.environ.get("OPENSCAD_COMMIT") or SOURCE_REVISIONS[SOURCE_TAG]
+if not re.fullmatch(r"[a-f0-9]{40}", SOURCE_COMMIT):
+    raise ValueError("OpenSCAD source revision must be a full 40-character SHA")
 SOURCE_VERSION = SOURCE_TAG.removeprefix("openscad-")
 MODERN_SOURCE = SOURCE_TAG != "openscad-2021.01"
 VCPKG_COMMIT = "6f7ffeb18f99796233b958aaaf14ec7bd4fb64b2"
