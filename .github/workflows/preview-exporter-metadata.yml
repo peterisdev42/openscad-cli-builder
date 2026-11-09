@@ -1,0 +1,47 @@
+name: Repair Preview Exporter Release Metadata
+
+on:
+  # One-time safe repair of the already published RC0 release. Later runs can
+  # be triggered manually, but ordinary pushes must not rewrite releases.
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/preview-exporter-metadata.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-exporter-release-metadata
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Validate and repair RC0 YAML Release header
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.head_commit.message == 'fix(preview-exporter): repair RC0 Release YAML header'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Test metadata format and safe Release edit
+        run: python3 -m unittest discover -s scripts/openscad-ci -p 'test_preview_release_metadata.py' -v
+      - name: Inspect existing Release (no changes)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/openscad-ci/preview_exporter/reconcile_release.py
+      - name: Patch Release description only and verify unchanged assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/openscad-ci/preview_exporter/reconcile_release.py --apply
+      - name: Confirm canonical YAML header is idempotent
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/openscad-ci/preview_exporter/reconcile_release.py --apply
