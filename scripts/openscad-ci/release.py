@@ -119,7 +119,9 @@ def release_notes(repository):
                      f"[{archive}.sha256]({base}{archive}.sha256) |")
     if SOURCE_TAG == PREVIEW_EXPORTER_SOURCE_TAG:
         archive = PREVIEW_EXPORTER_ASSET
-        lines.append(f"| macOS (Preview Exporter) | Apple Silicon (ARM64) | "
+        # Keep OS/Architectures identical to the existing macOS ARM64 CLI
+        # row. The archive name identifies this additional optional package.
+        lines.append(f"| macOS | Apple Silicon | "
                      f"[{archive}]({base}{archive}) | "
                      f"[{archive}.sha256]({base}{archive}.sha256) |")
     if os.environ.get("OPENSCAD_SNAPSHOT") == "true":
@@ -143,12 +145,19 @@ def release_notes(repository):
         "including libstdc++; glibc, the loader and graphics drivers come from the host.\n"
     )
     if SOURCE_TAG == PREVIEW_EXPORTER_SOURCE_TAG:
-        body += ("\n\nAdditional macOS ARM64 Preview Exporter: "
-                 "run `bin/openscad-preview-exporter -o model.csgp model.scad` "
-                 "to produce Prepared CSG Scene schema v1 using the official "
-                 "OpenSCAD geometry and CSG normalizer. "
-                 "This is a separate archive in this same OpenSCAD release, "
-                 "not a second Release/Tag.")
+        body += (
+            "\n\nPreview Exporter (macOS Apple Silicon only): this release includes "
+            "an additional OpenSCAD Preview Exporter archive alongside the six "
+            "standard CLI packages. It reuses OpenSCAD's C++ geometry evaluation, "
+            "CSG normalization, and Boolean Products to generate a Prepared CSG "
+            "Scene (`.csgp`, JSON schema v1). "
+            "It does not perform final OpenCSG rendering or produce a final "
+            "Boolean mesh.\n\n"
+            "After extracting the Preview Exporter archive, run "
+            "`bin/openscad-preview-exporter -o model.csgp model.scad`. "
+            "The standard macOS CLI and Preview Exporter are separate "
+            "downloadable archives within this same Release."
+        )
     channel = release_channel(SOURCE_TAG, snapshot=os.environ.get("OPENSCAD_SNAPSHOT") == "true")
     return with_release_header(body, VERSION, channel, SOURCE_COMMIT,
                                snapshot_url=os.environ.get("OPENSCAD_SNAPSHOT_URL") or None)
