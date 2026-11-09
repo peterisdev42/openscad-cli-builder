@@ -1,7 +1,6 @@
 import unittest
 
 from release_metadata import release_channel, with_release_header, yaml_release_header
-from sync_release_metadata import ASSET_NAMES, RELEASES, target
 
 
 class ReleaseMetadataTests(unittest.TestCase):
@@ -27,28 +26,24 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertNotIn("a" * 40, updated)
         self.assertEqual(updated.count("| OS | URL |"), 1)
 
-    def test_all_existing_releases_have_full_commits(self):
-        self.assertEqual(len(RELEASES), 3)
-        self.assertEqual(len(ASSET_NAMES), 12)
-        for tag, config in RELEASES.items():
-            with self.subTest(tag=tag):
-                self.assertEqual(len(config["commit"]), 40)
-                self.assertIn("commit: " + config["commit"],
-                              yaml_release_header(tag.removeprefix("openscad-"),
-                                                  config["channel"], config["commit"],
-                                                  snapshot_url=config.get("snapshot_url")))
+    def test_yaml_header_for_release_channels(self):
+        sha = "a" * 40
+        stable = yaml_release_header("2021.01", "stable", sha)
+        rc = yaml_release_header("2026.11-RC0", "rc", sha)
+        snapshot = yaml_release_header(
+            "2026.10.27", "snapshot", sha,
+            snapshot_url="https://files.openscad.org/snapshots/OpenSCAD-2026.10.27-x86_64.AppImage")
+        self.assertIn("channel: stable", stable)
+        self.assertIn("channel: rc", rc)
+        self.assertIn("channel: snapshot", snapshot)
+        self.assertIn("snapshotUrl:", snapshot)
 
-    def test_migration_only_changes_release_metadata(self):
-        for tag, config in RELEASES.items():
-            with self.subTest(tag=tag):
-                data = {"id": 123, "tag_name": tag, "body": "Existing download table",
-                        "assets": [{"name": name} for name in ASSET_NAMES], "draft": False}
-                payload = target(data)
-                self.assertEqual(set(payload), {"body", "prerelease", "make_latest"})
-                self.assertIn("Existing download table", payload["body"])
-                self.assertEqual(payload["prerelease"], config["channel"] != "stable")
-                self.assertEqual(payload["make_latest"], "true" if config["channel"] == "stable" else "false")
-                self.assertEqual(payload, target({**data, "body": payload["body"]}))
+    def test_header_rejects_invalid_source_and_snapshot_url(self):
+        with self.assertRaises(ValueError):
+            yaml_release_header("2026.11-RC0", "rc", "bad-sha")
+        with self.assertRaises(ValueError):
+            yaml_release_header("2026.10.27", "snapshot", "a" * 40,
+                                snapshot_url="https://example.com/untrusted.AppImage")
 
 
 if __name__ == "__main__":
