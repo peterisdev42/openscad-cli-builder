@@ -22,6 +22,12 @@ class WindowsUnicodeTest(unittest.TestCase):
         self.assertFalse(cases["U12"].cwd.isascii())
         self.assertTrue(cases["U13"].relocate)
 
+    def test_windows_environment_uses_uppercase_copied_keys(self):
+        with patch.dict(probe.os.environ, {"SYSTEMROOT": "windows", "OpEnScAdPaTh": "ambient"}, clear=True):
+            environment = probe.fixture_env(None)
+        self.assertNotIn("OPENSCADPATH", environment)
+        self.assertEqual(environment["PATH"].split(probe.os.pathsep)[0], str(Path("windows/System32")))
+
     def test_unsigned_windows_status_is_preserved(self):
         self.assertEqual(probe.exit_codes(3221226505),
                          {"signed": -1073740791, "unsigned": 3221226505,

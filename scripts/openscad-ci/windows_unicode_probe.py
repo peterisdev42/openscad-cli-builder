@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Run the unpacked x64 Windows CLI against isolated Unicode path fixtures."""
 
+from __future__ import annotations
+
 import argparse
 import base64
 from dataclasses import dataclass
@@ -60,8 +62,11 @@ CASES = (
 
 
 def sha256(path):
+    digest = hashlib.sha256()
     with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def stl_bounds(data):
@@ -151,8 +156,8 @@ def create_junction(target, link, root):
 
 def fixture_env(library):
     blocked = {"OPENSCADPATH", "OPENSCAD_FONT_PATH", "FONTCONFIG_PATH", "FONTCONFIG_FILE"}
-    env = {name: value for name, value in os.environ.items() if name.upper() not in blocked}
-    system = Path(env["SystemRoot"])
+    env = {name.upper(): value for name, value in os.environ.items() if name.upper() not in blocked}
+    system = Path(env["SYSTEMROOT"])
     env["PATH"] = os.pathsep.join(map(str, (system / "System32", system)))
     env.update(LIBGL_ALWAYS_SOFTWARE="1", GALLIUM_DRIVER="softpipe")
     if library:
