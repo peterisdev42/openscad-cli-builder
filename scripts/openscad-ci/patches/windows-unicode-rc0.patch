@@ -1,0 +1,940 @@
+diff --git a/src/FontCache.cc b/src/FontCache.cc
+index 1eb079ef54fba4a20aa557be63a4e03c2358903d..83cc9b9cf0a4fab9178f0ed3badd81e13383b9a3 100644
+--- a/src/FontCache.cc
++++ b/src/FontCache.cc
+@@ -24,6 +24,8 @@
+  *
+  */
+
++#include "platform/WindowsPath.h"
++
+ #include "FontCache.h"
+
+ #include <fontconfig/fontconfig.h>
+@@ -143,7 +145,7 @@ FontCache::FontCache()
+   const fs::path fontdir(PlatformUtils::resourcePath("fonts"));
+   if (fs::is_regular_file(fontdir / "fonts.conf")) {
+     auto abspath = fontdir.empty() ? fs::current_path() : fs::absolute(fontdir);
+-    PlatformUtils::setenv("FONTCONFIG_PATH", (abspath.generic_string()).c_str(), 0);
++    PlatformUtils::setenv("FONTCONFIG_PATH", (WindowsPath::genericUtf8(abspath)).c_str(), 0);
+   }
+
+   // Just load the configs. We'll build the fonts once all configs are loaded
+@@ -161,8 +163,8 @@ FontCache::FontCache()
+     builtinfontpath = fs::canonical(builtinfontpath);
+ #endif
+     FcConfigParseAndLoad(
+-      this->config, reinterpret_cast<const FcChar8 *>(builtinfontpath.generic_string().c_str()), false);
+-    add_font_dir(builtinfontpath.generic_string());
++      this->config, reinterpret_cast<const FcChar8 *>(WindowsPath::genericUtf8(builtinfontpath).c_str()), false);
++    add_font_dir(WindowsPath::genericUtf8(builtinfontpath));
+   }
+
+   const char *home = getenv("HOME");
+@@ -173,17 +175,17 @@ FontCache::FontCache()
+     add_font_dir(std::string(home) + "/.fonts");
+   }
+
+-  const char *env_font_path = getenv("OPENSCAD_FONT_PATH");
++  const wchar_t *env_font_path = _wgetenv(L"OPENSCAD_FONT_PATH");
+   if (env_font_path != nullptr) {
+-    std::string paths(env_font_path);
++    std::string paths = boost::nowide::narrow(env_font_path);
+     const std::string sep = PlatformUtils::pathSeparatorChar();
+     using string_split_iterator = boost::split_iterator<std::string::iterator>;
+     for (string_split_iterator it =
+            boost::make_split_iterator(paths, boost::first_finder(sep, boost::is_iequal()));
+          it != string_split_iterator(); ++it) {
+-      const fs::path p(boost::copy_range<std::string>(*it));
++      const auto p = fs::u8path(boost::copy_range<std::string>(*it));
+       if (fs::exists(p) && fs::is_directory(p)) {
+-        const std::string path = fs::absolute(p).string();
++        const std::string path = WindowsPath::utf8(fs::absolute(p));
+         add_font_dir(path);
+       }
+     }
+diff --git a/src/core/AST.cc b/src/core/AST.cc
+index 9a3c6263499261fa0a78570ab5f8c1deaadbb0fc..795f2b5ca161f26071c215cdfe8cb511823fe001 100644
+--- a/src/core/AST.cc
++++ b/src/core/AST.cc
+@@ -1,3 +1,5 @@
++#include "platform/WindowsPath.h"
++
+ #include "core/AST.h"
+
+ #include <filesystem>
+@@ -30,7 +32,7 @@ bool Location::isNone() const
+ std::string Location::toRelativeString(const std::string& docPath) const
+ {
+   if (this->isNone()) return "location unknown";
+-  return "in file " + fs_uncomplete((*path), docPath).generic_string() + ", " + "line " +
++  return "in file " + WindowsPath::genericUtf8(fs_uncomplete(*path, fs::u8path(docPath))) + ", " + "line " +
+          std::to_string(this->firstLine());
+ }
+
+diff --git a/src/core/ImportNode.cc b/src/core/ImportNode.cc
+index c762976fbe4342037d80776e6bb7975d6550e888..0a273e0b80402451d9cabcfe543e310aace66b3b 100644
+--- a/src/core/ImportNode.cc
++++ b/src/core/ImportNode.cc
+@@ -24,6 +24,8 @@
+  *
+  */
+
++#include "platform/WindowsPath.h"
++
+ #include "core/ImportNode.h"
+
+ #include "geometry/Geometry.h"
+@@ -73,19 +75,19 @@ static std::shared_ptr<AbstractNode> do_import(const ModuleInstantiation *inst,
+   std::string filename;
+   if (v.isDefined()) {
+     filename = lookup_file(v.isUndefined() ? "" : v.toString(),
+-                           inst->location().filePath().parent_path().string());
++                           WindowsPath::utf8(inst->location().filePath().parent_path()));
+   } else {
+     const auto& filename_val = parameters["filename"];
+     if (!filename_val.isUndefined()) {
+       LOG(message_group::Deprecated, "filename= is deprecated. Please use file=");
+     }
+     filename = lookup_file(filename_val.isUndefined() ? "" : filename_val.toString(),
+-                           inst->location().filePath().parent_path().string());
++                           WindowsPath::utf8(inst->location().filePath().parent_path()));
+   }
+   if (!filename.empty()) handle_dep(filename);
+   ImportType actualtype = type;
+   if (actualtype == ImportType::UNKNOWN) {
+-    std::string extraw = fs::path(filename).extension().generic_string();
++    std::string extraw = fs::u8path(filename).extension().generic_string();
+     std::string ext = boost::algorithm::to_lower_copy(extraw);
+     if (ext == ".stl") actualtype = ImportType::STL;
+     else if (ext == ".off") actualtype = ImportType::OFF;
+@@ -139,7 +141,7 @@ static std::shared_ptr<AbstractNode> do_import(const ModuleInstantiation *inst,
+     double val = dpi.toDouble();
+     if (val < 0.001) {
+       std::string filePath =
+-        fs_uncomplete(inst->location().filePath(), parameters.documentRoot()).generic_string();
++        WindowsPath::genericUtf8(fs_uncomplete(inst->location().filePath(), fs::u8path(parameters.documentRoot())));
+       LOG(message_group::Warning,
+           "Invalid dpi value giving, using default of %1$f dpi. Value must be positive and >= 0.001, "
+           "file %2$s, import() at line %3$d",
+@@ -263,7 +265,7 @@ std::unique_ptr<const Geometry> ImportNode::createGeometry() const
+ std::string ImportNode::toString() const
+ {
+   std::ostringstream stream;
+-  fs::path path((std::string)this->filename);
++  const auto path = fs::u8path(this->filename);
+
+   stream << this->name();
+   stream << "(file = " << this->filename;
+diff --git a/src/core/SourceFile.cc b/src/core/SourceFile.cc
+index 9541faa608778ab74f5828265e477d12c9e82142..c83ccf18fb63da6c10eb3149e9cd27506872f3f3 100644
+--- a/src/core/SourceFile.cc
++++ b/src/core/SourceFile.cc
+@@ -24,6 +24,8 @@
+  *
+  */
+
++#include "platform/WindowsPath.h"
++
+ #include "core/SourceFile.h"
+
+ #include <algorithm>
+@@ -71,10 +73,10 @@ void SourceFile::registerUse(const std::string& path, const Location& loc)
+                                                               loc.lastLine() % loc.lastColumn() %
+                                                               loc.fileName() % path);
+
+-  auto ext = fs::path(path).extension().generic_string();
++  auto ext = fs::u8path(path).extension().generic_string();
+
+   if (boost::iequals(ext, ".otf") || boost::iequals(ext, ".ttf")) {
+-    if (fs::is_regular_file(path)) {
++    if (fs::is_regular_file(fs::u8path(path))) {
+       FontCache::instance()->register_font_file(path);
+     } else {
+       LOG(message_group::Error, "Can't read font with path '%1$s'", path);
+@@ -116,7 +118,7 @@ time_t SourceFile::includesChanged() const
+
+ time_t SourceFile::include_modified(const std::string& filename) const
+ {
+-  struct stat st;
++  StatCache::FileStat st;
+
+   if (StatCache::stat(filename, st) == 0) {
+     return st.st_mtime;
+@@ -145,10 +147,10 @@ time_t SourceFile::handleDependencies(bool is_root)
+     auto found = true;
+
+     // Get an absolute filename for the module
+-    if (!fs::path(filename).is_absolute()) {
+-      auto fullpath = find_valid_path(this->path, filename);
++    if (!fs::u8path(filename).is_absolute()) {
++      auto fullpath = find_valid_path(fs::u8path(this->path), fs::u8path(filename));
+       if (!fullpath.empty()) {
+-        auto newfilename = fullpath.generic_string();
++        auto newfilename = WindowsPath::genericUtf8(fullpath);
+         updates.emplace_back(filename, newfilename);
+         filename = newfilename;
+       } else {
+@@ -203,10 +205,10 @@ std::shared_ptr<AbstractNode> SourceFile::instantiate(
+ // please call getFilename first and use this method only as a fallback
+ const std::string SourceFile::getFullpath() const
+ {
+-  if (fs::path(this->filename).is_absolute()) {
++  if (fs::u8path(this->filename).is_absolute()) {
+     return this->filename;
+   } else if (!this->path.empty()) {
+-    return (fs::path(this->path) / fs::path(this->filename)).generic_string();
++    return WindowsPath::genericUtf8(fs::u8path(this->path) / fs::u8path(this->filename));
+   } else {
+     return "";
+   }
+diff --git a/src/core/SourceFileCache.cc b/src/core/SourceFileCache.cc
+index 5500edb442dc8523815a4d637fde830cafad2444..784892a5225e5f7ddca1e85207999958bafec998 100644
+--- a/src/core/SourceFileCache.cc
++++ b/src/core/SourceFileCache.cc
+@@ -6,6 +6,7 @@
+ #include <boost/format.hpp>
+ #include <cstdio>
+ #include <ctime>
++#include <filesystem>
+ #include <fstream>
+ #include <string>
+
+@@ -45,7 +46,7 @@ std::time_t SourceFileCache::process(const std::string& mainFile, const std::str
+   if (file && file->isHandlingDependencies()) return 0;
+
+   // Create cache ID
+-  struct stat st;
++  StatCache::FileStat st;
+   bool valid = (StatCache::stat(filename, st) == 0);
+
+   // If file isn't there, just return and let the cache retain the old file
+@@ -97,7 +98,7 @@ std::time_t SourceFileCache::process(const std::string& mainFile, const std::str
+
+     std::string text;
+     {
+-      std::ifstream ifs(filename.c_str());
++      std::ifstream ifs(std::filesystem::u8path(filename));
+       if (!ifs.is_open()) {
+         LOG(message_group::Warning, "Can't open library file '%1$s'\n", filename);
+         return 0;
+diff --git a/src/core/StatCache.cc b/src/core/StatCache.cc
+index 267c51596f5ad9aad00d424999530f4bfec5d41a..f49262b822d1d2874d8fcb7aa0958008a51a6e2e 100644
+--- a/src/core/StatCache.cc
++++ b/src/core/StatCache.cc
+@@ -27,6 +27,7 @@
+ #include "core/StatCache.h"
+
+ #include <chrono>
++#include <filesystem>
+ #include <string>
+ #include <unordered_map>
+
+@@ -43,7 +44,7 @@ double millis_clock()
+ }
+
+ struct CacheEntry {
+-  struct stat st;    // result from stat
++  StatCache::FileStat st;    // result from stat
+   double timestamp;  // the time stat was called
+ };
+
+@@ -53,7 +54,7 @@ std::unordered_map<std::string, CacheEntry> statMap;
+
+ namespace StatCache {
+
+-int stat(const std::string& path, struct ::stat& st)
++int stat(const std::string& path, FileStat& st)
+ {
+   auto iter = statMap.find(path);
+   if (iter != statMap.end()) {  // Have we got an entry for this file?
+@@ -63,7 +64,7 @@ int stat(const std::string& path, struct ::stat& st)
+     }
+     statMap.erase(iter);  // Remove stale entry
+   }
+-  if (auto rv = ::stat(path.c_str(), &st)) return rv;  // stat failed
++  if (auto rv = ::_wstat(std::filesystem::u8path(path).c_str(), &st)) return rv;  // stat failed
+   statMap[path] = {st, millis_clock()};
+   return 0;
+ }
+diff --git a/src/core/StatCache.h b/src/core/StatCache.h
+index fb7b2eb2c0fe523af6d507635c657bdde2a09c37..e938ed77d1c68a5ca627946721d4cdd46bed6114 100644
+--- a/src/core/StatCache.h
++++ b/src/core/StatCache.h
+@@ -32,6 +32,8 @@
+
+ namespace StatCache {
+
+-int stat(const std::string& path, struct ::stat& st);
++using FileStat = struct ::_stat;
++
++int stat(const std::string& path, FileStat& st);
+
+ }
+diff --git a/src/core/customizer/ParameterObject.cc b/src/core/customizer/ParameterObject.cc
+index 7bce3285c089348ae5fd3740ec387ab3e3e84e08..a545633447dddbd1cb5d1d85774961ee39f0ea7a 100644
+--- a/src/core/customizer/ParameterObject.cc
++++ b/src/core/customizer/ParameterObject.cc
+@@ -1,3 +1,5 @@
++#include "platform/WindowsPath.h"
++
+ #include "core/customizer/ParameterObject.h"
+
+ #include <boost/algorithm/string.hpp>
+@@ -552,7 +554,7 @@ ParameterObjects ParameterObjects::fromSourceFile(const SourceFile *sourceFile)
+   // stable docPath: an empty one makes Location::toRelativeString() fall back
+   // to the current working directory (see fs_uncomplete()), which is neither
+   // stable across invocations nor meaningful to the person reading the warning.
+-  const auto docPath = fs::path(sourceFile->getFullpath()).parent_path().generic_string();
++  const auto docPath = WindowsPath::genericUtf8(fs::u8path(sourceFile->getFullpath()).parent_path());
+
+   ParameterObjects output;
+   for (const auto& assignment : sourceFile->scope->assignments) {
+diff --git a/src/core/lexer.l b/src/core/lexer.l
+index 98a6a410804d5042fcf06ccf6c751b30f813722f..16a49c2be1051110e3549664c2e8d903218796be 100644
+--- a/src/core/lexer.l
++++ b/src/core/lexer.l
+@@ -30,6 +30,8 @@
+
+ %{
+
++#include "platform/WindowsPath.h"
++
+ #include "handle_dep.h"
+ #include "core/str_utf8_wrapper.h"
+ #include "core/UnicodeIdentifier.h"
+@@ -181,13 +183,13 @@ use[ \t\r\n]*"<"        { BEGIN(cond_use); LOCATION_COUNT_LINES(parserlloc, yyte
+ [^\t\r\n>]+             { filename = yytext; }
+  ">"                    {
+                             BEGIN(INITIAL);
+-                            fs::path fullpath = find_valid_path(sourcefile()->parent_path(), fs::path(filename), &openfilenames);
++                            fs::path fullpath = find_valid_path(sourcefile()->parent_path(), fs::u8path(filename), &openfilenames);
+                             if (fullpath.empty()) {
+                             LOG(message_group::Warning,LOCATION(parserlloc),"","Can't open library '%1$s'.",filename);
+                                 parserlval.text = strdup(filename.c_str());
+                             } else {
+-                                handle_dep(fullpath.generic_string());
+-                                parserlval.text = strdup(fullpath.string().c_str());
++                                handle_dep(WindowsPath::genericUtf8(fullpath));
++                                parserlval.text = strdup(WindowsPath::utf8(fullpath).c_str());
+                             }
+                             return TOK_USE;
+                         }
+@@ -429,27 +431,27 @@ bool lexer_is_main_file()
+  */
+ void includefile(const Location& loc)
+ {
+-  fs::path localpath = fs::path(filepath) / filename;
++  fs::path localpath = fs::u8path(filepath) / fs::u8path(filename);
+   fs::path fullpath = find_valid_path(sourcefile()->parent_path(), localpath, &openfilenames);
+   if (!fullpath.empty()) {
+-    rootfile->registerInclude(localpath.generic_string(), fullpath.generic_string(), lexer_is_main_file() ? loc : Location::NONE);
++    rootfile->registerInclude(WindowsPath::genericUtf8(localpath), WindowsPath::genericUtf8(fullpath), lexer_is_main_file() ? loc : Location::NONE);
+   }
+   else {
+-    rootfile->registerInclude(localpath.generic_string(), localpath.generic_string(), Location::NONE);
+-    LOG(message_group::Warning,LOCATION(parserlloc),"","Can't find include file '%1$s'.",localpath.generic_string());
++    rootfile->registerInclude(WindowsPath::genericUtf8(localpath), WindowsPath::genericUtf8(localpath), Location::NONE);
++    LOG(message_group::Warning,LOCATION(parserlloc),"","Can't find include file '%1$s'.",WindowsPath::genericUtf8(localpath));
+     return;
+   };
+
+-  std::string fullname = fullpath.generic_string();
++  std::string fullname = WindowsPath::genericUtf8(fullpath);
+
+   filepath.clear();
+   filename_stack.push_back(std::make_shared<fs::path>(fullpath));
+
+   handle_dep(fullname);
+
+-  yyin = fopen(fullname.c_str(), "r");
++  yyin = _wfopen(fullpath.c_str(), L"r");
+   if (!yyin) {
+-    LOG(message_group::Warning,LOCATION(parserlloc),"","Can't open include file '%1$s'.",localpath.generic_string());
++    LOG(message_group::Warning,LOCATION(parserlloc),"","Can't open include file '%1$s'.",WindowsPath::genericUtf8(localpath));
+     filename_stack.pop_back();
+     return;
+   }
+diff --git a/src/core/parser.y b/src/core/parser.y
+index 8c78e3694e26bfb5d87d94649986735143ce64d6..5f1786bad8b890e2dcd1f75440d5828fefcb9e42 100644
+--- a/src/core/parser.y
++++ b/src/core/parser.y
+@@ -36,6 +36,8 @@
+ #include <unistd.h>
+ #endif
+
++#include "platform/WindowsPath.h"
++
+ #include "core/SourceFile.h"
+ #include "core/UserModule.h"
+ #include "core/ModuleInstantiation.h"
+@@ -736,7 +738,7 @@ static void warn_reassignment(const Location& loc, const std::shared_ptr<Assignm
+ {
+ 	LOG(message_group::Warning,
+ 			loc,
+-			path.parent_path().generic_string(),
++			WindowsPath::genericUtf8(path.parent_path()),
+ 			"%1$s was assigned on line %2$i but was overwritten",
+ 			quoteVar(assignment->getName()),
+ 			assignment->location().firstLine());
+@@ -747,7 +749,7 @@ static void warn_reassignment(const Location& loc, const std::shared_ptr<Assignm
+ {
+ 	LOG(message_group::Warning,
+ 			loc,
+-			path1.parent_path().generic_string(),
++			WindowsPath::genericUtf8(path1.parent_path()),
+ 			"%1$s was assigned on line %2$i of %3$s but was overwritten",
+ 			quoteVar(assignment->getName()),
+ 			assignment->location().firstLine(),
+@@ -759,7 +761,7 @@ void handle_assignment(const std::string token, Expression *expr, const Location
+ 	bool found = false;
+ 	for (auto &assignment : scope_stack.top()->assignments) {
+ 		if (assignment->getName() == token) {
+-			auto mainFile = mainFilePath.generic_string();
++			auto mainFile = WindowsPath::genericUtf8(mainFilePath);
+ 			auto prevFile = assignment->location().fileName();
+ 			auto currFile = loc.fileName();
+
+@@ -795,8 +797,8 @@ bool parse(SourceFile *&file, const std::string& text, const std::string &filena
+ {
+   fs::path filepath;
+   try {
+-    filepath = filename.empty() ? fs::current_path() : fs::absolute(fs::path{filename});
+-    mainFilePath = mainFile.empty() ? fs::current_path() : fs::absolute(fs::path{mainFile});
++    filepath = filename.empty() ? fs::current_path() : fs::absolute(fs::u8path(filename));
++    mainFilePath = mainFile.empty() ? fs::current_path() : fs::absolute(fs::u8path(mainFile));
+   } catch (const std::filesystem::filesystem_error& fs_err) {
+     LOG(message_group::Error, "Parser error: file system error: %1$s", fs_err.what());
+     return false;
+@@ -807,7 +809,7 @@ bool parse(SourceFile *&file, const std::string& text, const std::string &filena
+   }
+
+   parsingMainFile = mainFilePath == filepath;
+-  fs::path parser_sourcefile = fs::path(filepath).generic_string();
++  fs::path parser_sourcefile = filepath.generic_wstring();
+   lexer_set_parser_sourcefile(parser_sourcefile);
+
+   lexerin = NULL;
+@@ -815,7 +817,7 @@ bool parse(SourceFile *&file, const std::string& text, const std::string &filena
+   parser_input_buffer = text.c_str();
+   fileEnded = false;
+
+-  rootfile = new SourceFile(parser_sourcefile.parent_path().string(), parser_sourcefile.filename().string());
++  rootfile = new SourceFile(WindowsPath::utf8(parser_sourcefile.parent_path()), WindowsPath::utf8(parser_sourcefile.filename()));
+   scope_stack.push(rootfile->scope);
+   //        PRINTB_NOCACHE("New module: %s %p", "root" % rootfile);
+
+diff --git a/src/core/parsersettings.cc b/src/core/parsersettings.cc
+index ed039b2a5e985fc8f76acbf12564f6da640fbee2..28a0c93e696e8c4e7ad7d564ffad7585cead9145 100644
+--- a/src/core/parsersettings.cc
++++ b/src/core/parsersettings.cc
+@@ -1,3 +1,5 @@
++#include "platform/WindowsPath.h"
++
+ #include "core/parsersettings.h"
+
+ #include <algorithm>
+@@ -32,9 +34,9 @@ const std::vector<std::string>& get_library_path()
+ fs::path search_libs(const fs::path& localpath)
+ {
+   for (const auto& dir : librarypath) {
+-    fs::path usepath = fs::path(dir) / localpath;
++    fs::path usepath = fs::u8path(dir) / localpath;
+     if (fs::exists(usepath) && !fs::is_directory(usepath)) {
+-      return usepath.string();
++      return usepath;
+     }
+   }
+   return {};
+@@ -61,7 +63,7 @@ static bool check_valid(const fs::path& p, const std::vector<std::string> *openf
+     // LOG(message_group::Warning,,"%1$s invalid - points to a directory",p);
+     return false;
+   }
+-  const std::string& fullname = p.generic_string();
++  const std::string& fullname = WindowsPath::genericUtf8(p);
+   // Detect circular includes
+   if (openfilenames) {
+     for (const auto& s : *openfilenames) {
+@@ -109,7 +111,7 @@ inline fs::path find_valid_path_(const fs::path& sourcepath, const fs::path& loc
+ fs::path find_valid_path(const fs::path& sourcepath, const fs::path& localpath,
+                          const std::vector<std::string> *openfilenames)
+ {
+-  return {find_valid_path_(sourcepath, localpath, openfilenames).generic_string()};
++  return {find_valid_path_(sourcepath, localpath, openfilenames).generic_wstring()};
+ }
+
+ static bool path_contains_file(fs::path dir, fs::path file)
+@@ -137,8 +139,8 @@ static bool path_contains_file(fs::path dir, fs::path file)
+ fs::path get_library_for_path(const fs::path& localpath)
+ {
+   for (const auto& libpath : librarypath) {
+-    if (path_contains_file(fs::path(libpath), localpath)) {
+-      return libpath;
++    if (path_contains_file(fs::u8path(libpath), localpath)) {
++      return fs::u8path(libpath);
+     }
+   }
+   return {};
+@@ -147,17 +149,17 @@ fs::path get_library_for_path(const fs::path& localpath)
+ void parser_init()
+ {
+   // Add paths from OPENSCADPATH before adding built-in paths
+-  const char *openscadpaths = getenv("OPENSCADPATH");
++  const wchar_t *openscadpaths = _wgetenv(L"OPENSCADPATH");
+   if (openscadpaths) {
+-    std::string paths(openscadpaths);
++    std::string paths = boost::nowide::narrow(openscadpaths);
+     std::string sep = PlatformUtils::pathSeparatorChar();
+     using string_split_iterator = boost::split_iterator<std::string::iterator>;
+     for (string_split_iterator it =
+            boost::make_split_iterator(paths, boost::first_finder(sep, boost::is_iequal()));
+          it != string_split_iterator(); ++it) {
+       auto str{boost::copy_range<std::string>(*it)};
+-      fs::path abspath = str.empty() ? fs::current_path() : fs::absolute(fs::path(str));
+-      add_librarydir(abspath.generic_string());
++      fs::path abspath = str.empty() ? fs::current_path() : fs::absolute(fs::u8path(str));
++      add_librarydir(WindowsPath::genericUtf8(abspath));
+     }
+   }
+
+@@ -168,5 +170,5 @@ void parser_init()
+   if (libpath.empty()) {
+     libpath = fs::current_path();
+   }
+-  add_librarydir(fs::absolute(libpath).string());
++  add_librarydir(WindowsPath::utf8(fs::absolute(libpath)));
+ }
+diff --git a/src/glview/ColorMap.cc b/src/glview/ColorMap.cc
+index bc39a8fca08648b52b013e76ccec401ad3bb2413..e4e200733a32e1e3ac557fadee8c839e7193d8a5 100644
+--- a/src/glview/ColorMap.cc
++++ b/src/glview/ColorMap.cc
+@@ -1,3 +1,7 @@
++#include <fstream>
++
++#include "platform/WindowsPath.h"
++
+ #include "glview/ColorMap.h"
+ #include "core/ColorUtil.h"
+ #include "utils/printutils.h"
+@@ -51,7 +55,8 @@ RenderColorScheme::RenderColorScheme() : _path("")
+ RenderColorScheme::RenderColorScheme(const fs::path& path) : _path(path)
+ {
+   try {
+-    boost::property_tree::read_json(path.generic_string().c_str(), pt);
++    std::ifstream stream(path);
++    boost::property_tree::read_json(stream, pt);
+     _name = pt.get<std::string>("name");
+     _index = pt.get<int>("index");
+     _show_in_gui = pt.get<bool>("show-in-gui");
+@@ -73,7 +78,7 @@ RenderColorScheme::RenderColorScheme(const fs::path& path) : _path(path)
+       addColor(RenderColor::BACKGROUND_STOP_COLOR, "background");
+     }
+   } catch (const std::exception& e) {
+-    LOG("Error reading color scheme file: '%1$s': %2$s", path.generic_string().c_str(), e.what());
++    LOG("Error reading color scheme file: '%1$s': %2$s", WindowsPath::genericUtf8(path).c_str(), e.what());
+     _error = e.what();
+     _name = "";
+     _index = 0;
+@@ -103,7 +108,7 @@ bool RenderColorScheme::showInGui() const
+
+ std::string RenderColorScheme::path() const
+ {
+-  return _path.string();
++  return WindowsPath::utf8(_path);
+ }
+
+ std::string RenderColorScheme::error() const
+@@ -220,7 +225,7 @@ void ColorMap::enumerateColorSchemesInPath(colorscheme_set_t& result_set, const
+ {
+   const fs::path color_schemes = basePath / "color-schemes" / "render";
+
+-  PRINTDB("Enumerating color schemes from '%s'", color_schemes.generic_string().c_str());
++  PRINTDB("Enumerating color schemes from '%s'", WindowsPath::genericUtf8(color_schemes).c_str());
+
+   fs::directory_iterator end_iter;
+
+@@ -256,8 +261,8 @@ ColorMap::colorscheme_set_t ColorMap::enumerateColorSchemes()
+   auto *defaultColorScheme = new RenderColorScheme();
+   result_set.insert(colorscheme_set_t::value_type(
+     defaultColorScheme->index(), std::shared_ptr<RenderColorScheme>(defaultColorScheme)));
+-  enumerateColorSchemesInPath(result_set, PlatformUtils::resourceBasePath());
+-  enumerateColorSchemesInPath(result_set, PlatformUtils::userConfigPath());
++  enumerateColorSchemesInPath(result_set, fs::u8path(PlatformUtils::resourceBasePath()));
++  enumerateColorSchemesInPath(result_set, fs::u8path(PlatformUtils::userConfigPath()));
+
+   return result_set;
+ }
+diff --git a/src/handle_dep.cc b/src/handle_dep.cc
+index c2ab59b1652831d866501b526bc253c7a89bd9d1..adc70a7e8828cbd7319448bf88d46cac670d6f89 100644
+--- a/src/handle_dep.cc
++++ b/src/handle_dep.cc
+@@ -1,3 +1,5 @@
++#include "platform/WindowsPath.h"
++
+ #include "handle_dep.h"
+
+ #include <cerrno>
+@@ -28,8 +30,8 @@ std::unordered_set<std::string> dependencies;
+
+ void handle_dep(const std::string& filename)
+ {
+-  const fs::path filepath(filename);
+-  const std::string dep = boost::regex_replace(filepath.generic_string(), boost::regex("\\ "), "\\\\ ");
++  const auto filepath = fs::u8path(filename);
++  const std::string dep = boost::regex_replace(WindowsPath::genericUtf8(filepath), boost::regex("\\ "), "\\\\ ");
+   if (dependencies.find(dep) != dependencies.end()) {
+     return;  // included and used files are very likely to be added many times by the parser
+   }
+@@ -72,7 +74,7 @@ void handle_dep(const std::string& filename)
+
+ bool write_deps(const std::string& filename, const std::vector<std::string>& output_files)
+ {
+-  FILE *fp = fopen(filename.c_str(), "wt");
++  FILE *fp = _wfopen(fs::u8path(filename).c_str(), L"wt");
+   if (!fp) {
+     fprintf(stderr, "Can't open dependencies file `%s' for writing!\n", filename.c_str());
+     return false;
+diff --git a/src/io/export.cc b/src/io/export.cc
+index cf3890a27cf73195b39835cc1ee182fbe4a322a3..0df84e43e291aac1bf40f629c789d5658b84d94e 100644
+--- a/src/io/export.cc
++++ b/src/io/export.cc
+@@ -24,6 +24,8 @@
+  *
+  */
+
++#include "platform/WindowsPath.h"
++
+ #include "io/export.h"
+
+ #include <algorithm>
+@@ -186,7 +188,7 @@ ExportInfo createExportInfo(const FileFormat& format, const FileFormatInfo& info
+   auto exportInfo = ExportInfo{
+     .format = format,
+     .info = info,
+-    .title = std::filesystem::path(filepath).filename().string(),
++    .title = WindowsPath::utf8(std::filesystem::u8path(filepath).filename()),
+     .sourceFilePath = filepath,
+     .camera = camera,
+     .defaultColor = ColorMap::getColor(*colorScheme, RenderColor::CGAL_FACE_FRONT_COLOR),
+@@ -243,7 +245,7 @@ bool exportFileByName(const std::shared_ptr<const Geometry>& root_geom, const st
+       exportInfo.format == FileFormat::PDF) {
+     mode |= std::ios::binary;
+   }
+-  const std::filesystem::path path(filename);
++  const auto path = std::filesystem::u8path(filename);
+   std::ofstream fstream(path, mode);
+   if (!fstream.is_open()) {
+     LOG(_("Can't open file \"%1$s\" for export"), filename);
+diff --git a/src/io/fileutils.cc b/src/io/fileutils.cc
+index 6dcf8f913203af4f0d87fc5a2fd97e5c00d6516f..50d3614a954e7cbadab837099abd26eb6838e1a0 100644
+--- a/src/io/fileutils.cc
++++ b/src/io/fileutils.cc
+@@ -1,3 +1,5 @@
++#include "platform/WindowsPath.h"
++
+ #include "io/fileutils.h"
+
+ #include <chrono>
+@@ -25,7 +27,7 @@ std::string lookup_file(const std::string& path, const std::string& parent)
+     return "";
+   }
+
+-  if (fs::path(path).is_absolute()) {
++  if (fs::u8path(path).is_absolute()) {
+     return path;
+   }
+
+@@ -33,7 +35,7 @@ std::string lookup_file(const std::string& path, const std::string& parent)
+     return "";
+   }
+
+-  return fs::absolute(fs::path(parent) / path).string();
++  return WindowsPath::utf8(fs::absolute(fs::u8path(parent) / fs::u8path(path)));
+ }
+
+ fs::path fs_uncomplete(fs::path const& p, fs::path const& base)
+diff --git a/src/openscad.cc b/src/openscad.cc
+index bf09f83428c1d11117943bc379af11a6be8c4450..0f9bb8fa2148139f8a1842d95bf3dc314569b5b3 100644
+--- a/src/openscad.cc
++++ b/src/openscad.cc
+@@ -24,6 +24,8 @@
+  *
+  */
+
++#include "platform/WindowsPath.h"
++
+ #include "openscad.h"
+
+ #include "version.h"
+@@ -223,8 +225,8 @@ bool checkAndExport(const std::shared_ptr<const Geometry>& root_geom, unsigned d
+
+ void help(const char *arg0, const po::options_description& desc, bool failure = false)
+ {
+-  const fs::path progpath(arg0);
+-  LOG("Usage: %1$s [options] file.scad\n%2$s", progpath.filename().string(), desc);
++  const auto progpath = fs::u8path(arg0);
++  LOG("Usage: %1$s [options] file.scad\n%2$s", WindowsPath::utf8(progpath.filename()), desc);
+   exit(failure ? 1 : 0);
+ }
+
+@@ -393,15 +395,15 @@ Camera get_camera(const po::variables_map& vm)
+ int do_export(const CommandLine& cmd, const RenderVariables& render_variables, FileFormat export_format,
+               SourceFile *root_file)
+ {
+-  auto filename_str = fs::path(cmd.output_file).generic_string();
++  auto filename_str = WindowsPath::genericUtf8(fs::u8path(cmd.output_file));
+   // Avoid possibility of fs::absolute throwing when passed an empty path
+-  auto fpath = cmd.filename.empty() ? fs::current_path() : fs::absolute(fs::path(cmd.filename));
++  auto fpath = cmd.filename.empty() ? fs::current_path() : fs::absolute(fs::u8path(cmd.filename));
+   auto fparent = fpath.parent_path();
+
+   // set CWD relative to source file
+   fs::current_path(fparent);
+
+-  EvaluationSession session{fparent.string()};
++  EvaluationSession session{WindowsPath::utf8(fparent)};
+   ContextHandle<BuiltinContext> builtin_context{Context::create<BuiltinContext>(&session)};
+   render_variables.applyToContext(builtin_context);
+
+@@ -441,7 +443,7 @@ int do_export(const CommandLine& cmd, const RenderVariables& render_variables, F
+     LOG(message_group::Warning, *nextLocation, builtin_context->documentRoot(),
+         "More than one Root Modifier (!)");
+   }
+-  Tree tree(root_node, fparent.string());
++  Tree tree(root_node, WindowsPath::utf8(fparent));
+
+   if (export_format == FileFormat::CSG) {
+     // https://github.com/openscad/openscad/issues/128
+@@ -551,7 +553,7 @@ int cmdline(const CommandLine& cmd)
+     export_format = cmd.export_format.get();
+   } else {
+     // else extract format from file extension
+-    const auto path = fs::path(cmd.output_file);
++    const auto path = fs::u8path(cmd.output_file);
+     std::string suffix = path.has_extension() ? path.extension().generic_string().substr(1) : "";
+     boost::algorithm::to_lower(suffix);
+
+@@ -565,13 +567,13 @@ int cmdline(const CommandLine& cmd)
+   }
+
+   // Do some minimal checking of output directory before rendering (issue #432)
+-  auto output_dir = fs::path(cmd.output_file).parent_path();
++  auto output_dir = fs::u8path(cmd.output_file).parent_path();
+   if (output_dir.empty()) {
+     // If output_file_str has no directory prefix, set output directory to current directory.
+     output_dir = fs::current_path();
+   }
+   if (!fs::is_directory(output_dir)) {
+-    LOG("\n'%1$s' is not a directory for output file %2$s - Skipping\n", output_dir.generic_string(),
++    LOG("\n'%1$s' is not a directory for output file %2$s - Skipping\n", WindowsPath::genericUtf8(output_dir),
+         cmd.output_file);
+     return 1;
+   }
+@@ -666,12 +668,12 @@ int cmdline(const CommandLine& cmd)
+       std::ostringstream oss;
+       oss << std::setw(5) << std::setfill('0') << frame;
+
+-      auto frame_file = fs::path(cmd.output_file);
++      auto frame_file = fs::u8path(cmd.output_file);
+       auto extension = frame_file.extension();
+       frame_file.replace_extension();
+       frame_file += oss.str();
+       frame_file.replace_extension(extension);
+-      std::string const frame_str = frame_file.generic_string();
++      std::string const frame_str = WindowsPath::genericUtf8(frame_file);
+
+       LOG("Exporting %1$s...", cmd.filename);
+
+@@ -762,9 +764,9 @@ void set_render_color_scheme(const std::string& color_scheme, const bool exit_if
+ void localization_init()
+ {
+   fs::path const po_dir(PlatformUtils::resourcePath("locale"));
+-  const std::string& locale_path(po_dir.string());
++  const std::string& locale_path(WindowsPath::utf8(po_dir));
+
+-  if (fs::is_directory(locale_path)) {
++  if (fs::is_directory(po_dir)) {
+     setlocale(LC_ALL, "");
+     bindtextdomain("openscad", locale_path.c_str());
+     bind_textdomain_codeset("openscad", "UTF-8");
+@@ -823,7 +825,7 @@ int openscad_main(int argc, char **argv)
+
+ #ifndef __EMSCRIPTEN__
+   const auto applicationPath =
+-    weakly_canonical(boost::dll::program_location()).parent_path().generic_string();
++    WindowsPath::genericUtf8(weakly_canonical(boost::dll::program_location()).parent_path());
+ #else
+   const auto applicationPath = boost::dll::fs::current_path();
+ #endif
+@@ -832,7 +834,7 @@ int openscad_main(int argc, char **argv)
+ #ifdef ENABLE_PYTHON
+   // The original name as called, not resolving links and so on. This will
+   // just forward everything to the python main.
+-  const auto applicationName = fs::path(argv[0]).filename().generic_string();
++  const auto applicationName = WindowsPath::genericUtf8(fs::u8path(argv[0]).filename());
+   if (applicationName == "python" || applicationName == "python3" ||
+       applicationName.rfind("python3.", 0) == 0 || applicationName == "openscad-python") {
+     return pythonRunArgs(argc, argv);
+diff --git a/src/platform/PlatformUtils-win.cc b/src/platform/PlatformUtils-win.cc
+index ac06da779b56bae9e9e3e654020b8b34c59827d3..f03f1fb48a0696fda20f730629ff8aba31318cb7 100644
+--- a/src/platform/PlatformUtils-win.cc
++++ b/src/platform/PlatformUtils-win.cc
+@@ -1,3 +1,5 @@
++#include "platform/WindowsPath.h"
++
+ #include "platform/PlatformUtils.h"
+
+ #include <algorithm>
+@@ -42,12 +44,7 @@ static const std::string getFolderPath(int nFolder)
+   int result = SHGetFolderPathW(hwndOwner, nFolder, hToken, dwFlags, pszPath);
+
+   if (result == S_OK) {
+-    path = std::wstring(path.c_str());  // strip extra nullptrs
+-    // Use std::filesystem to decide how to convert from wstring
+-    // to string. Normally the path encoding is system local and
+-    // we don't want to force conversion to UTF-8.
+-    fs::path p(path);
+-    return p.string();
++    return boost::nowide::narrow(path.c_str());
+   }
+   return "";
+ }
+diff --git a/src/platform/PlatformUtils.cc b/src/platform/PlatformUtils.cc
+index ae7bbd04b3734b0a9d6445e6fa16fe0e0c6235ff..0404285dd36d66889a98a887ce004eabfbd033d8 100644
+--- a/src/platform/PlatformUtils.cc
++++ b/src/platform/PlatformUtils.cc
+@@ -1,3 +1,5 @@
++#include "platform/WindowsPath.h"
++
+ #include "platform/PlatformUtils.h"
+
+ #include <cstdint>
+@@ -29,8 +31,8 @@ const char *PlatformUtils::OPENSCAD_FOLDER_NAME = "OpenSCAD";
+
+ static std::string lookupResourcesPath()
+ {
+-  fs::path resourcedir(applicationpath);
+-  PRINTDB("Looking up resource folder with application path '%s'", resourcedir.generic_string().c_str());
++  auto resourcedir = fs::u8path(applicationpath);
++  PRINTDB("Looking up resource folder with application path '%s'", WindowsPath::genericUtf8(resourcedir).c_str());
+
+ #ifdef __APPLE__
+   const char *searchpath[] = {"../Resources",                        // Resources can be bundled on Mac.
+@@ -62,11 +64,11 @@ static std::string lookupResourcesPath()
+     // The resource folder is the folder which contains "color-schemes" (as well as
+     // "examples" and "locale", and optionally "libraries" and "fonts")
+     const fs::path checkdir = tmpdir / "color-schemes";
+-    PRINTDB("Checking '%s'", checkdir.generic_string().c_str());
++    PRINTDB("Checking '%s'", WindowsPath::genericUtf8(checkdir).c_str());
+
+     if (is_directory(checkdir)) {
+       resourcedir = tmpdir;
+-      PRINTDB("Found resource folder '%s'", tmpdir.generic_string().c_str());
++      PRINTDB("Found resource folder '%s'", WindowsPath::genericUtf8(tmpdir).c_str());
+       break;
+     }
+   }
+@@ -75,7 +77,7 @@ static std::string lookupResourcesPath()
+ #ifndef __EMSCRIPTEN__
+   resourcedir = fs::canonical(resourcedir);
+ #endif
+-  std::string result = resourcedir.generic_string();
++  std::string result = WindowsPath::genericUtf8(resourcedir);
+   PRINTDB("Using resource folder '%s'", result);
+   return result;
+ }
+@@ -100,9 +102,9 @@ bool PlatformUtils::createUserLibraryPath()
+   std::string path = PlatformUtils::userLibraryPath();
+   bool OK = false;
+   try {
+-    if (!fs::exists(fs::path(path))) {
++    if (!fs::exists(fs::u8path(path))) {
+       LOG("Creating library folder %1$s", path);
+-      OK = fs::create_directories(path);
++      OK = fs::create_directories(fs::u8path(path));
+     }
+     if (!OK) {
+       LOG(message_group::Error, "Cannot create %1$s", path);
+@@ -119,7 +121,7 @@ std::string PlatformUtils::userPath(const std::string& name)
+   try {
+     std::string pathstr = PlatformUtils::documentsPath();
+     if (pathstr == "") return "";
+-    path = fs::path(pathstr);
++    path = fs::u8path(pathstr);
+     if (!fs::exists(path)) return "";
+ #ifndef __EMSCRIPTEN__
+     path = fs::canonical(path);
+@@ -134,7 +136,7 @@ std::string PlatformUtils::userPath(const std::string& name)
+   } catch (const fs::filesystem_error& ex) {
+     LOG(message_group::Error, "%1$s", ex.what());
+   }
+-  return path.generic_string();
++  return WindowsPath::genericUtf8(path);
+ }
+
+ std::string PlatformUtils::userLibraryPath()
+@@ -153,7 +155,7 @@ std::string PlatformUtils::backupPath()
+   try {
+     std::string pathstr = PlatformUtils::documentsPath();
+     if (pathstr == "") return "";
+-    path = fs::path(pathstr);
++    path = fs::u8path(pathstr);
+     if (!fs::exists(path)) return "";
+ #ifndef __EMSCRIPTEN__
+     path = fs::canonical(path);
+@@ -164,7 +166,7 @@ std::string PlatformUtils::backupPath()
+   } catch (const fs::filesystem_error& ex) {
+     LOG(message_group::Error, "%1$s", ex.what());
+   }
+-  return path.generic_string();
++  return WindowsPath::genericUtf8(path);
+ }
+
+ bool PlatformUtils::createBackupPath()
+@@ -172,8 +174,8 @@ bool PlatformUtils::createBackupPath()
+   std::string path = PlatformUtils::backupPath();
+   bool OK = false;
+   try {
+-    if (!fs::exists(fs::path(path))) {
+-      OK = fs::create_directories(path);
++    if (!fs::exists(fs::u8path(path))) {
++      OK = fs::create_directories(fs::u8path(path));
+     }
+     if (!OK) {
+       LOG(message_group::Error, "Cannot create %1$s", path);
+@@ -195,7 +197,7 @@ std::string PlatformUtils::resourceBasePath()
+
+ fs::path PlatformUtils::resourcePath(const std::string& resource)
+ {
+-  fs::path base(resourceBasePath());
++  const auto base = fs::u8path(resourceBasePath());
+   if (!fs::is_directory(base)) {
+     return {};
+   }
+diff --git a/src/platform/WindowsPath.h b/src/platform/WindowsPath.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..bca5449858659ae1ff2c29321a26b8a92eb33c4a
+--- /dev/null
++++ b/src/platform/WindowsPath.h
+@@ -0,0 +1,21 @@
++#pragma once
++
++#include <boost/nowide/convert.hpp>
++#include <filesystem>
++#include <string>
++
++namespace WindowsPath {
++
++// OpenSCAD's CLI, parser and library strings contain UTF-8.
++// MSVC's path::string() and path::generic_string() use a locale code page.
++inline std::string utf8(const std::filesystem::path& path)
++{
++  return boost::nowide::narrow(path.wstring());
++}
++
++inline std::string genericUtf8(const std::filesystem::path& path)
++{
++  return boost::nowide::narrow(path.generic_wstring());
++}
++
++}

@@ -32,6 +32,8 @@ SOURCE_VERSION = SOURCE_TAG.removeprefix("openscad-")
 MODERN_SOURCE = SOURCE_TAG != "openscad-2021.01"
 VCPKG_COMMIT = "6f7ffeb18f99796233b958aaaf14ec7bd4fb64b2"
 MESA_VERSION = "24.3.4"
+WINDOWS_UNICODE_SOURCE_TAG = "openscad-2026.11-RC0"
+WINDOWS_UNICODE_PATCH = HERE / "patches/windows-unicode-rc0.patch"
 MESA_SHA256 = "e641ae27191d387599219694560d221b7feaa91c900bcec46bf444218ed66025"
 NATIVE_TARGETS = ("macos-x64", "macos-arm64", "windows-x64", "linux-x64", "linux-arm64")
 TARGETS = (*NATIVE_TARGETS, "wasm")
@@ -197,6 +199,30 @@ def patch_source(source):
         patch_modern_source(source)
     else:
         patch_legacy_source(source)
+
+
+def patch_windows_unicode(source, commit):
+    """Apply the RC0 Windows patch only to exact, pristine upstream blobs."""
+    if commit != SOURCE_REVISIONS[WINDOWS_UNICODE_SOURCE_TAG]:
+        raise RuntimeError("Windows Unicode patch requires the pinned RC0 source revision")
+    blobs = re.findall(r"^diff --git a/(src/[^ ]+) b/\1\nindex ([a-f0-9]{40})\.\.",
+                       WINDOWS_UNICODE_PATCH.read_text(encoding="utf-8"), re.MULTILINE)
+    if not blobs:
+        raise RuntimeError("Missing Windows Unicode patch preimages")
+    for name, expected in blobs:
+        path = source / name
+        if expected == "0" * 40:
+            if path.exists():
+                raise RuntimeError(f"Unexpected Windows Unicode patch file already present: {name}")
+        else:
+            data = path.read_bytes()
+            blob = b"blob " + str(len(data)).encode("ascii") + b"\0" + data
+            if hashlib.sha1(blob).hexdigest() != expected:
+                raise RuntimeError(f"Unexpected Windows Unicode patch preimage: {name}")
+    # A source copy under .build must be treated as a standalone directory.
+    env = dict(os.environ, GIT_CEILING_DIRECTORIES=source.parent.resolve().as_posix())
+    run("git", "apply", "--check", "--whitespace=error-all", WINDOWS_UNICODE_PATCH, cwd=source, env=env)
+    run("git", "apply", "--whitespace=error-all", WINDOWS_UNICODE_PATCH, cwd=source, env=env)
 
 
 def archive_source(repo, destination):
@@ -548,6 +574,8 @@ def stage(source, build, work, target, prefix, mesa):
         "manifold": MODERN_SOURCE,
         "asan": False,
         "builder_commit": os.environ.get("GITHUB_SHA"),
+        **({"windows_unicode_patch_sha256": hashlib.sha256(WINDOWS_UNICODE_PATCH.read_bytes()).hexdigest()}
+           if target == "windows-x64" and SOURCE_TAG == WINDOWS_UNICODE_SOURCE_TAG else {}),
         **({"libc": "glibc", "minimum_glibc": LINUX_GLIBC_BASELINE,
             "required_glibc": linux_glibc_requirement(package), "linux_baseline": "ubuntu-22.04"}
            if target.startswith("linux") else {}),
@@ -735,6 +763,8 @@ def main():
         path = line.split()[1]
         archive_source(repo / path, source / path)
     patch_source(source)
+    if target == "windows-x64" and SOURCE_TAG == WINDOWS_UNICODE_SOURCE_TAG:
+        patch_windows_unicode(source, SOURCE_COMMIT)
     if PREVIEW_EXPORTER:
         from preview_exporter.patch import patch_preview_exporter
         patch_preview_exporter(source)

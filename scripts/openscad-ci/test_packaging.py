@@ -13,7 +13,7 @@ import zipfile
 
 from build import (ROOT, SOURCE_COMMIT, SOURCE_TAG, TARGETS, NATIVE_TARGETS, check_architecture,
                    patch_source, patch_legacy_source, patch_modern_source, MODERN_SOURCE, package_name, verify_runtime_dependencies)
-from build import smoke_test, copy_windows_runtime
+from build import archive_source, patch_windows_unicode, smoke_test, copy_windows_runtime
 from release import verify_assets, release_assets, release_notes, publish, RELEASE_TAG, release_title_from_commit
 from wasm import WASM_IMAGE, WASM_CAPABILITIES
 
@@ -282,6 +282,29 @@ class PackagingTests(unittest.TestCase):
             self.assertNotIn('ci-dependencies.cmake', patched)
             with self.assertRaises((RuntimeError, ValueError)):
                 patch_modern_source(source)
+
+    @unittest.skipUnless(SOURCE_TAG == "openscad-2026.11-RC0", "Unicode patch is pinned to the official RC0")
+    def test_windows_unicode_patch_requires_pristine_rc0(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source"
+            archive_source(ROOT / "sources/openscad", source)
+            path = source / "src/openscad.cc"
+            original = path.read_bytes()
+            with self.assertRaisesRegex(RuntimeError, "requires the pinned RC0"):
+                patch_windows_unicode(source, "0" * 40)
+            path.write_bytes(original + b"\n")
+            with self.assertRaisesRegex(RuntimeError, "patch preimage: src/openscad.cc"):
+                patch_windows_unicode(source, SOURCE_COMMIT)
+            self.assertFalse((source / "src/platform/WindowsPath.h").exists())
+            path.write_bytes(original)
+            patch_windows_unicode(source, SOURCE_COMMIT)
+            self.assertIn("fs::u8path(cmd.filename)", path.read_text(encoding="utf-8"))
+            self.assertIn('_wgetenv(L"OPENSCADPATH")',
+                          (source / "src/core/parsersettings.cc").read_text(encoding="utf-8"))
+            patched = path.read_bytes()
+            with self.assertRaisesRegex(RuntimeError, "patch preimage"):
+                patch_windows_unicode(source, SOURCE_COMMIT)
+            self.assertEqual(path.read_bytes(), patched)
 
     def test_architecture_detection_rejects_mislabeled_artifacts(self):
         with tempfile.TemporaryDirectory() as directory:

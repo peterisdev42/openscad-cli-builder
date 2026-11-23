@@ -100,7 +100,6 @@ jobs:
   build:
     name: ${{ matrix.label }}
     needs: [resolve, validate]
-    if: github.event_name != 'pull_request'
     env:
       OPENSCAD_TAG: ${{ needs.resolve.outputs.tag }}
       OPENSCAD_COMMIT: ${{ needs.resolve.outputs.commit }}
@@ -111,10 +110,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { target: macos-x64, label: darwin-x64, runner: macos-26-intel, triplet: x64-osx }
-          - { target: macos-arm64, label: darwin-arm64, runner: macos-latest, triplet: arm64-osx }
-          - { target: windows-x64, label: win32-x64, runner: windows-2022, triplet: x64-windows, arch: x64 }
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"target":"windows-x64","label":"win32-x64","runner":"windows-2022","triplet":"x64-windows","arch":"x64"}]' || '[{"target":"macos-x64","label":"darwin-x64","runner":"macos-26-intel","triplet":"x64-osx"},{"target":"macos-arm64","label":"darwin-arm64","runner":"macos-latest","triplet":"arm64-osx"},{"target":"windows-x64","label":"win32-x64","runner":"windows-2022","triplet":"x64-windows","arch":"x64"}]') }}
     steps:
       - uses: actions/checkout@v5
       # Fetch only OpenSCAD and its pinned submodules, not the builder's other sources.
@@ -200,6 +196,19 @@ jobs:
         run: |
           python scripts/openscad-ci/build.py
           python scripts/openscad-ci/preview_exporter/verify_release.py dist
+      - name: Run Phase B Unicode probe on the ZIP
+        if: matrix.target == 'windows-x64' && github.event_name == 'pull_request'
+        run: python scripts/openscad-ci/windows_unicode_probe.py --archive dist/openscad-cli-windows-x86_64.zip --output unicode-report.json
+      - name: Upload Windows Unicode evidence
+        if: always() && matrix.target == 'windows-x64' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v6
+        with:
+          name: phase-b-windows-unicode
+          path: |
+            unicode-report.json
+            .build/windows-x64/smoke/smoke.log
+          include-hidden-files: true
+          if-no-files-found: ignore
       - name: Save dependency cache (including partial builds)
         if: always()
         uses: actions/cache/save@v5
