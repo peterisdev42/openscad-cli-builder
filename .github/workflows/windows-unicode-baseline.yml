@@ -1,0 +1,53 @@
+name: Windows Unicode RC0 baseline
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/windows-unicode-baseline.yml
+      - scripts/openscad-ci/windows_unicode_probe.py
+      - scripts/openscad-ci/test_windows_unicode.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          architecture: x64
+      - name: Verify the public RC0 and reproduce the Unicode failures
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'openscad-cli-windows-x86_64.zip'
+          Invoke-WebRequest -Uri 'https://github.com/peterisdev42/openscad-cli-builder/releases/download/openscad-2026.11-RC0/openscad-cli-windows-x86_64.zip' -OutFile $zip
+          python scripts/openscad-ci/windows_unicode_probe.py --archive $zip --baseline --output baseline-failing.json
+          $probeExit = $LASTEXITCODE
+          $report = Get-Content -Raw baseline-failing.json | ConvertFrom-Json
+          $results = @{}
+          foreach ($case in $report.cases) {
+            $results[$case.id] = $case.status
+            Write-Host "$($case.id) $($case.status)"
+          }
+          if ($probeExit -ne 1 -or $report.status -ne 'fail' -or $results.U01 -ne 'pass' -or $results.U12 -ne 'pass') {
+            throw 'Expected a failing native RC0 report with both controls passing'
+          }
+          foreach ($id in @('U02', 'U03', 'U08')) {
+            if ($results[$id] -notin @('nonzero_exit', 'missing_stl', 'invalid_stl', 'wrong_geometry')) {
+              throw "The published RC0 did not reproduce the expected failure for $id"
+            }
+          }
+          exit 0
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: baseline-failing
+          path: baseline-failing.json
+          if-no-files-found: error
