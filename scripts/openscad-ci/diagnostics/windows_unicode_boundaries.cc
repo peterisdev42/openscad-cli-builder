@@ -1,55 +1,134 @@
 // Isolate the Windows process and MSVC filesystem boundaries from OpenSCAD.
 #include <windows.h>
+#include <mbctype.h>
 
+#include <clocale>
 #include <cstdlib>
-#include <cstring>
-#include <cwchar>
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
 #include <string>
+#include <string_view>
+#include <system_error>
 
 namespace fs = std::filesystem;
 
-std::string to_utf8(const wchar_t *value)
+template <typename Char>
+void hex_units(const char *name, std::basic_string_view<Char> value)
 {
-  const auto length = static_cast<int>(std::wcslen(value));
+  std::cout << name << '=' << std::hex << std::setfill('0');
+  for (const auto unit : value) {
+    std::cout << ' ' << std::setw(sizeof(Char) * 2)
+              << (static_cast<unsigned>(unit) & (sizeof(Char) == 1 ? 0xff : 0xffff));
+  }
+  std::cout << std::dec << '\n';
+}
+
+[[noreturn]] void throw_win32(const char *operation)
+{
+  throw std::system_error(GetLastError(), std::system_category(), operation);
+}
+
+std::string to_utf8(std::wstring_view value)
+{
+  if (value.empty()) return {};
+  const auto length = static_cast<int>(value.size());
   const auto size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
-                                       value, length, nullptr, 0, nullptr, nullptr);
+                                       value.data(), length, nullptr, 0, nullptr, nullptr);
+  if (!size) throw_win32("WideCharToMultiByte(size)");
   std::string result(size, '\0');
-  if (size) WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
-                                value, length, result.data(), size, nullptr, nullptr);
+  if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+                           value.data(), length, result.data(), size, nullptr, nullptr)) {
+    throw_win32("WideCharToMultiByte(convert)");
+  }
   return result;
+}
+
+template <typename Check>
+bool stage(const char *name, Check check)
+{
+  std::cout << "begin " << name << '\n';
+  try {
+    const bool passed = check();
+    std::cout << "end " << name << " result=" << passed << '\n';
+    return passed;
+  } catch (const std::system_error& error) {
+    std::cout << "exception " << name << " code=" << error.code().value()
+              << " category=" << error.code().category().name() << " what=" << error.what() << '\n';
+  } catch (const std::exception& error) {
+    std::cout << "exception " << name << " what=" << error.what() << '\n';
+  } catch (...) {
+    std::cout << "exception " << name << " unknown\n";
+  }
+  return false;
 }
 
 int wmain(int argc, wchar_t **argv)
 {
+  std::cout << std::unitbuf << std::boolalpha;
+  std::cout << "acp=" << GetACP() << " console_cp=" << GetConsoleCP()
+            << " console_output_cp=" << GetConsoleOutputCP()
+            << " crt_mbcp=" << _getmbcp() << " crt_locale=" << std::setlocale(LC_CTYPE, nullptr) << '\n';
   if (argc != 2) return 2;
-  const auto utf8 = to_utf8(argv[1]);
-  const fs::path wide(argv[1]);
-  const auto decoded = fs::u8path(utf8);
-  const auto *environment = _wgetenv(L"OPENSCADPATH");
-  const auto *narrow_environment = std::getenv("OPENSCADPATH");
-  std::cout << std::boolalpha
-            << "acp=" << GetACP() << '\n'
-            << "utf16_units=" << std::wcslen(argv[1]) << '\n'
-            << "utf8_bytes=" << utf8.size() << '\n'
-            << "wide_exists=" << fs::is_directory(wide) << '\n'
-            << "u8path_exists=" << fs::is_directory(decoded) << '\n'
-            << "u8path_matches_wide=" << (decoded == wide) << '\n'
-            << "wide_environment_matches=" << (environment && wide == fs::path(environment)) << '\n'
-            << "narrow_environment_bytes=" << (narrow_environment ? std::strlen(narrow_environment) : 0) << '\n'
-            << "narrow_environment_matches_utf8=" << (narrow_environment && utf8 == narrow_environment) << '\n';
-  try {
+
+  const std::wstring_view argument(argv[1]);
+  hex_units("argv_utf16", argument);
+  std::string utf8;
+  const bool converted = stage("argv_to_utf8", [&] {
+    utf8 = to_utf8(argument);
+    hex_units("argv_utf8", std::string_view(utf8));
+    return !utf8.empty();
+  });
+  fs::path wide;
+  const bool wide_ok = stage("filesystem_wide", [&] {
+    wide = fs::path(argument);
+    return fs::is_directory(wide);
+  });
+  const bool u8_ok = stage("filesystem_u8path", [&] {
+    if (!converted) return false;
+    const auto path = fs::u8path(utf8);
+    hex_units("u8path_native_utf16", std::wstring_view(path.native()));
+    return fs::is_directory(path) && path == wide;
+  });
+  const bool win32_env_ok = stage("win32_wide_environment", [&] {
+    const DWORD size = GetEnvironmentVariableW(L"OPENSCADPATH", nullptr, 0);
+    if (!size) throw_win32("GetEnvironmentVariableW(size)");
+    std::wstring value(size, L'\0');
+    const DWORD length = GetEnvironmentVariableW(L"OPENSCADPATH", value.data(), size);
+    if (!length || length >= size) throw_win32("GetEnvironmentVariableW(read)");
+    value.resize(length);
+    hex_units("win32_environment_utf16", std::wstring_view(value));
+    return value == argument;
+  });
+  const bool wide_env_ok = stage("crt_wide_environment", [&] {
+    const auto *environment = _wgetenv(L"OPENSCADPATH");
+    if (!environment) return false;
+    hex_units("crt_wide_environment_utf16", std::wstring_view(environment));
+    return argument == environment;
+  });
+  stage("crt_narrow_environment", [&] {
+    const auto *environment = std::getenv("OPENSCADPATH");
+    if (!environment) return false;
+    hex_units("crt_narrow_environment_bytes", std::string_view(environment));
+    return converted && utf8 == environment;
+  });
+  stage("filesystem_narrow_constructor", [&] {
+    if (!converted) return false;
     const fs::path ordinary(utf8);
-    std::cout << "ordinary_path_exists=" << fs::is_directory(ordinary) << '\n'
-              << "ordinary_path_matches_wide=" << (ordinary == wide) << '\n';
-  } catch (const fs::filesystem_error& error) {
-    std::cout << "ordinary_path_error_code=" << error.code().value() << '\n';
-  }
-  try {
-    std::cout << "wide_to_narrow_matches_utf8=" << (wide.generic_string() == to_utf8(wide.generic_wstring().c_str())) << '\n';
-  } catch (const fs::filesystem_error& error) {
-    std::cout << "\nwide_to_narrow_error_code=" << error.code().value() << '\n';
-  }
-  return !environment || wide != fs::path(environment) || !fs::is_directory(wide) || decoded != wide;
+    hex_units("ordinary_native_utf16", std::wstring_view(ordinary.native()));
+    return fs::is_directory(ordinary) && ordinary == wide;
+  });
+  const bool wide_utf8_ok = stage("filesystem_wide_to_utf8", [&] {
+    if (!wide_ok) return false;
+    const auto value = wide.generic_u8string();
+    hex_units("generic_utf8", std::u8string_view(value));
+    return std::string(value.begin(), value.end()) == to_utf8(wide.generic_wstring());
+  });
+  stage("filesystem_wide_to_narrow", [&] {
+    if (!wide_ok) return false;
+    const auto value = wide.generic_string();
+    hex_units("generic_narrow", std::string_view(value));
+    return value == to_utf8(wide.generic_wstring());
+  });
+  return !(converted && wide_ok && u8_ok && win32_env_ok && wide_env_ok && wide_utf8_ok);
 }

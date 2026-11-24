@@ -25,9 +25,15 @@ jobs:
           architecture: x64
       - name: Verify the public RC0 and reproduce the Unicode failures
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $zip = Join-Path $env:RUNNER_TEMP 'openscad-cli-windows-x86_64.zip'
-          Invoke-WebRequest -Uri 'https://github.com/peterisdev42/openscad-cli-builder/releases/download/openscad-2026.11-RC0/openscad-cli-windows-x86_64.zip' -OutFile $zip
+          # Keep the original asset usable even when the Release's Git tag is absent.
+          Invoke-WebRequest -Uri 'https://api.github.com/repos/peterisdev42/openscad-cli-builder/releases/assets/700816726' -Headers @{
+            Accept = 'application/octet-stream'
+            Authorization = "Bearer $env:GH_TOKEN"
+          } -OutFile $zip
           python scripts/openscad-ci/windows_unicode_probe.py --archive $zip --baseline --output baseline-failing.json
           $probeExit = $LASTEXITCODE
           $report = Get-Content -Raw baseline-failing.json | ConvertFrom-Json

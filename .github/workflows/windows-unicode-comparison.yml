@@ -28,13 +28,18 @@ jobs:
         run: |
           cl.exe /nologo /EHsc /std:c++20 /Bv /Fe:unicode-boundaries.exe scripts/openscad-ci/diagnostics/windows_unicode_boundaries.cc /link /SUBSYSTEM:CONSOLE /ENTRY:wmainCRTStartup
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $PSNativeCommandUseErrorActionPreference = $false
+          $failed = $false
           foreach ($leaf in @('ascii', '项目 A', 'café model', '模型🧀')) {
             $path = (New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP "$leaf-boundaries")).FullName
             $env:OPENSCADPATH = $path
             "fixture=$leaf" | Tee-Object -FilePath msvc-boundaries.log -Append
             ./unicode-boundaries.exe $path | Tee-Object -FilePath msvc-boundaries.log -Append
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $code = $LASTEXITCODE
+            ('exit={0} hex=0x{0:X8}' -f $code) | Tee-Object -FilePath msvc-boundaries.log -Append
+            if ($code -ne 0) { $failed = $true }
           }
+          if ($failed) { throw 'One or more wide/UTF-8 boundary controls failed' }
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -82,7 +87,8 @@ jobs:
           cmake -S upstream -B build-independent -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DOPENSCAD_VERSION=2026.11-RC0 -DHEADLESS=ON -DNULLGL=OFF -DUSE_QT6=OFF \
             -DENABLE_TESTS=OFF -DENABLE_GUI_TESTS=OFF -DUSE_MIMALLOC=OFF
-          cmake --build build-independent --target OpenSCADExe --parallel 2
+          cmake --build build-independent --target OpenSCADExe winconsole --parallel 2
+          test -f build-independent/winconsole/openscad.com
           cmake --install build-independent --prefix "$PWD/independent"
           mkdir -p independent/bin
           if [[ -f independent/openscad.exe ]]; then

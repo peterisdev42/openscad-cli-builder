@@ -80,44 +80,37 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("commit: " + SOURCE_COMMIT, notes)
         self.assertIn("channel: ", notes)
 
-    def test_new_release_targets_branch_when_build_commit_is_no_longer_head(self):
+    def test_new_release_targets_the_verified_builder_commit(self):
         with tempfile.TemporaryDirectory() as directory:
             dist = Path(directory)
             for name in release_assets():
                 (dist / name).touch()
             current = {'assets': [{'name': name, 'id': i} for i, name in enumerate(release_assets())]}
-            with mock.patch.dict(os.environ, {'GITHUB_REF_NAME': 'main', 'GITHUB_SHA': 'old-build-commit', 'OPENSCAD_SOURCE_COMMIT_DATE': '2026-10-15T02:45:40Z'}), mock.patch(
-                    'release.verify_assets'), mock.patch('release.subprocess.check_output',
-                    side_effect=[json.dumps([[]]), json.dumps(current)]), mock.patch(
+            builder = "a" * 40
+            with mock.patch.dict(os.environ, {'GITHUB_SHA': builder,
+                                             'OPENSCAD_SOURCE_COMMIT_DATE': '2026-10-15T02:45:40Z'}), mock.patch(
+                    'release.verify_candidate') as verify, mock.patch('release.subprocess.check_output',
+                    side_effect=[json.dumps({'data': {'repository': {'release': None}}}), json.dumps(current)]), mock.patch(
                     'release.subprocess.check_call') as command:
                 publish(dist, dist / 'notes.md', 'example/builder')
-                args = command.call_args_list[0].args[0]
+                verify.assert_called_once_with(dist)
+                command.assert_called_once()
+                args = command.call_args.args[0]
                 self.assertEqual(args[:3], ['gh', 'release', 'create'])
-                self.assertEqual(args[args.index('--target') + 1], 'main')
-                self.assertNotIn('old-build-commit', args)
+                self.assertEqual(args[args.index('--target') + 1], builder)
 
-    def test_release_cleanup_only_after_verified_upload(self):
+    def test_existing_release_is_never_modified_even_without_a_git_tag(self):
         with tempfile.TemporaryDirectory() as directory:
             dist = Path(directory)
-            for name in release_assets():
-                (dist / name).touch()
-            existing = {'tag_name': RELEASE_TAG}
-            current = {'assets': [{'name': name, 'id': i} for i, name in enumerate(release_assets())]
-                       + [{'name': 'openscad-cli-2021.01-source.tar.gz', 'id': 99}]}
-            with mock.patch.dict(os.environ, {'OPENSCAD_SOURCE_COMMIT_DATE': '2026-10-15T02:45:40Z'}), mock.patch('release.verify_assets'), mock.patch(
-                    'release.subprocess.check_output', side_effect=[json.dumps([[existing]]), json.dumps(current)]), mock.patch(
+            existing = {'data': {'repository': {'release': {'databaseId': 42}}}}
+            with mock.patch('release.verify_candidate'), mock.patch(
+                    'release.subprocess.check_output', return_value=json.dumps(existing)) as query, mock.patch(
                     'release.subprocess.check_call') as command:
-                publish(dist, dist / 'notes.md', 'example/builder')
-                calls = [call.args[0] for call in command.call_args_list]
-                self.assertEqual(calls[-1], ['gh', 'api', '--method', 'DELETE',
-                                            'repos/example/builder/releases/assets/99'])
-                self.assertNotIn(str(dist / 'openscad-cli-2021.01-source.tar.gz'), calls[0])
-            with mock.patch.dict(os.environ, {'OPENSCAD_SOURCE_COMMIT_DATE': '2026-10-15T02:45:40Z'}), mock.patch('release.verify_assets'), mock.patch(
-                    'release.subprocess.check_output', return_value=json.dumps([[existing]])), mock.patch(
-                    'release.subprocess.check_call', side_effect=subprocess.CalledProcessError(1, 'gh')) as command:
-                with self.assertRaises(subprocess.CalledProcessError):
+                with self.assertRaisesRegex(RuntimeError, 'Refusing to overwrite existing Release'):
                     publish(dist, dist / 'notes.md', 'example/builder')
-                self.assertEqual(command.call_count, 1)
+                self.assertEqual(query.call_args.args[0][:3], ['gh', 'api', 'graphql'])
+                self.assertIn(f'tag={RELEASE_TAG}', query.call_args.args[0])
+                command.assert_not_called()
 
     def test_windows_runtime_collection_follows_transitive_imports_and_toolset(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -282,6 +275,32 @@ class PackagingTests(unittest.TestCase):
             self.assertNotIn('ci-dependencies.cmake', patched)
             with self.assertRaises((RuntimeError, ValueError)):
                 patch_modern_source(source)
+
+    @unittest.skipUnless(SOURCE_TAG == "openscad-2026.11-RC0", "Unicode patch is pinned to the official RC0")
+    def test_windows_unicode_archive_overrides_autocrlf(self):
+        name = "src/FontCache.cc"
+        git = ["git", "-C", str(ROOT / "sources/openscad")]
+        self.assertEqual(subprocess.check_output([*git, "rev-parse", "HEAD"], text=True).strip(), SOURCE_COMMIT)
+        blob = subprocess.check_output([*git, "cat-file", "blob", f"HEAD:{name}"])
+        blob_id = subprocess.check_output([*git, "rev-parse", f"HEAD:{name}"], text=True).strip()
+        self.assertEqual(blob_id, "1eb079ef54fba4a20aa557be63a4e03c2358903d")
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(os.environ, {
+            "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.autocrlf", "GIT_CONFIG_VALUE_0": "true",
+        }):
+            raw_tar = subprocess.check_output([*git, "archive", "HEAD", name])
+            with tarfile.open(fileobj=io.BytesIO(raw_tar)) as archive:
+                converted = archive.extractfile(name).read()
+            source = Path(directory) / "source"
+            archive_source(ROOT / "sources/openscad", source)
+            actual = (source / name).read_bytes()
+            for label, contents in (("blob", blob), ("autocrlf archive", converted), ("fixed archive", actual)):
+                crlf = contents.count(b"\r\n")
+                print(f"{name} {label}: SHA256 {hashlib.sha256(contents).hexdigest()}, "
+                      f"CRLF lines {crlf}", flush=True)
+            self.assertEqual(converted, blob.replace(b"\n", b"\r\n"))
+            self.assertGreater(converted.count(b"\r\n"), 0)
+            self.assertEqual(actual, blob)
+            patch_windows_unicode(source, SOURCE_COMMIT)
 
     @unittest.skipUnless(SOURCE_TAG == "openscad-2026.11-RC0", "Unicode patch is pinned to the official RC0")
     def test_windows_unicode_patch_requires_pristine_rc0(self):

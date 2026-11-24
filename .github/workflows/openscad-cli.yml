@@ -131,6 +131,9 @@ jobs:
         with:
           python-version: '3.11'
           architecture: ${{ runner.os == 'macOS' && runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+      - name: Regress RC0 source archiving with Windows autocrlf enabled
+        if: runner.os == 'Windows' && needs.resolve.outputs.tag == 'openscad-2026.11-RC0'
+        run: python -m unittest discover -s scripts/openscad-ci -p test_packaging.py -k windows_unicode
       - name: Select and report the image's default Xcode toolchain
         if: runner.os == 'macOS'
         run: |
@@ -196,19 +199,6 @@ jobs:
         run: |
           python scripts/openscad-ci/build.py
           python scripts/openscad-ci/preview_exporter/verify_release.py dist
-      - name: Run Phase B Unicode probe on the ZIP
-        if: matrix.target == 'windows-x64' && github.event_name == 'pull_request'
-        run: python scripts/openscad-ci/windows_unicode_probe.py --archive dist/openscad-cli-windows-x86_64.zip --output unicode-report.json
-      - name: Upload Windows Unicode evidence
-        if: always() && matrix.target == 'windows-x64' && github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v6
-        with:
-          name: phase-b-windows-unicode
-          path: |
-            unicode-report.json
-            .build/windows-x64/smoke/smoke.log
-          include-hidden-files: true
-          if-no-files-found: ignore
       - name: Save dependency cache (including partial builds)
         if: always()
         uses: actions/cache/save@v5
@@ -223,6 +213,14 @@ jobs:
           path: dist/*
           if-no-files-found: error
           retention-days: 14
+      - name: Upload Windows relocated smoke evidence
+        if: success() && matrix.target == 'windows-x64'
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-relocated-smoke
+          path: .build/windows-x64/smoke/smoke.log
+          include-hidden-files: true
+          if-no-files-found: error
       - name: Upload diagnostics
         if: failure()
         uses: actions/upload-artifact@v6
@@ -234,6 +232,39 @@ jobs:
             .build/**/*.log
             .build/**/CMakeCache.txt
           if-no-files-found: ignore
+
+  windows-unicode:
+    name: Unicode ZIP acceptance (${{ matrix.image }})
+    needs: build
+    runs-on: ${{ matrix.image }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [windows-2022, windows-2025]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          architecture: x64
+      - uses: actions/download-artifact@v7
+        with:
+          name: openscad-cli-windows-x64
+          path: dist
+      - name: Run all 15 native Unicode cases against the builder ZIP
+        env:
+          SCAD_WINDOWS_RUNNER: ${{ matrix.image }}
+        run: python scripts/openscad-ci/windows_unicode_probe.py --archive dist/openscad-cli-windows-x86_64.zip --output ${{ matrix.image }}.json
+      - name: Upload Unicode results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-unicode-${{ matrix.image }}
+          path: ${{ matrix.image }}.json
+          if-no-files-found: error
 
   linux:
     name: ${{ matrix.target }}
@@ -359,7 +390,7 @@ jobs:
 
   release:
     name: Verify all CLI and RC0 Preview Exporter assets; publish Release
-    needs: [resolve, build, linux, wasm]
+    needs: [resolve, build, windows-unicode, linux, wasm]
     if: github.event_name != 'pull_request'
     env:
       OPENSCAD_TAG: ${{ needs.resolve.outputs.tag }}
@@ -389,6 +420,11 @@ jobs:
         with:
           pattern: openscad-cli-*
           path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: windows-unicode-*
+          path: .build/windows-unicode
           merge-multiple: true
       - name: Verify complete release assets and generate unified Release notes
         run: python3 scripts/openscad-ci/release.py

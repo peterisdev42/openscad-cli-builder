@@ -13,6 +13,7 @@ import zipfile
 from build import ROOT, SOURCE_COMMIT, SOURCE_TAG, TARGETS, MODERN_SOURCE, package_name, LINUX_GLIBC_BASELINE
 from wasm import WASM_IMAGE, WASM_CAPABILITIES
 from release_metadata import release_channel, with_release_header
+from windows_unicode_probe import PACKAGE as WINDOWS_PACKAGE, verify_acceptance
 
 # The Preview Exporter is a seventh *asset type*, only for the audited RC0
 # release; it must never alter the published asset lists of other source tags.
@@ -163,16 +164,31 @@ def release_notes(repository):
                                snapshot_url=os.environ.get("OPENSCAD_SNAPSHOT_URL") or None)
 
 
-def publish(dist, notes, repository):
-    # Never upload an unchecked dist glob or remove old assets before upload succeeds.
+def verify_candidate(dist):
     verify_assets(dist)
+    verify_acceptance(dist / f"{WINDOWS_PACKAGE}.zip", ROOT / ".build/windows-unicode",
+                      SOURCE_TAG, SOURCE_COMMIT, os.environ["GITHUB_SHA"], os.environ["GITHUB_RUN_ID"])
+
+
+def existing_release(repository, tag):
+    owner, name = repository.split("/")
+    # The REST list omits published releases whose Git tag was deleted.
+    query = ("query($owner:String!,$name:String!,$tag:String!) {"
+             "repository(owner:$owner,name:$name) { release(tagName:$tag) { databaseId } } }")
+    data = json.loads(subprocess.check_output(
+        ["gh", "api", "graphql", "-f", f"query={query}", "-f", f"owner={owner}",
+         "-f", f"name={name}", "-f", f"tag={tag}"], text=True))
+    return data["data"]["repository"]["release"]
+
+
+def publish(dist, notes, repository):
+    verify_candidate(dist)
+    if existing_release(repository, RELEASE_TAG) is not None:
+        raise RuntimeError(f"Refusing to overwrite existing Release {RELEASE_TAG}")
     assets = release_assets()
     for name in assets:
         if not (dist / name).is_file():
             raise FileNotFoundError(dist / name)
-    releases = json.loads(subprocess.check_output(
-        ["gh", "api", "--paginate", "--slurp", f"repos/{repository}/releases?per_page=100"], text=True))
-    existing = next((r for page in releases for r in page if r["tag_name"] == RELEASE_TAG), None)
     files = [str(dist / name) for name in assets]
     title = release_title_from_commit(SOURCE_TAG, os.environ.get("OPENSCAD_SOURCE_COMMIT_DATE"))
     common = ["--repo", repository]
@@ -181,32 +197,20 @@ def publish(dist, notes, repository):
     channel = release_channel(SOURCE_TAG, snapshot=os.environ.get("OPENSCAD_SNAPSHOT") == "true")
     prerelease = channel != "stable"
     latest_arg = "--latest" if not prerelease else "--latest=false"
-    if existing:
-        subprocess.check_call(["gh", "release", "upload", RELEASE_TAG, *files, "--clobber", *common])
-        subprocess.check_call(["gh", "release", "edit", RELEASE_TAG, "--title", title,
-                               "--notes-file", str(notes), latest_arg,
-                               "--prerelease" if prerelease else "--prerelease=false", *common])
-    else:
-        # A moving branch ref remains publishable if main advances during the build.
-        # The package build-info.json records the actual immutable builder commit.
-        subprocess.check_call(["gh", "release", "create", RELEASE_TAG, *files,
-                               "--target", os.environ["GITHUB_REF_NAME"], "--title", title,
-                               "--notes-file", str(notes), latest_arg,
-                               *(["--prerelease"] if prerelease else []), *common])
+    subprocess.check_call(["gh", "release", "create", RELEASE_TAG, *files,
+                           "--target", os.environ["GITHUB_SHA"], "--title", title,
+                           "--notes-file", str(notes), latest_arg,
+                           *(["--prerelease"] if prerelease else []), *common])
     current = json.loads(subprocess.check_output(
         ["gh", "api", f"repos/{repository}/releases/tags/{RELEASE_TAG}"], text=True))
     uploaded = {a["name"] for a in current["assets"]}
-    if not set(assets).issubset(uploaded):
-        raise RuntimeError("Release upload incomplete; retaining existing assets")
-    for asset in current["assets"]:
-        if asset["name"] not in assets:
-            subprocess.check_call(["gh", "api", "--method", "DELETE",
-                                   f"repos/{repository}/releases/assets/{asset['id']}"])
+    if set(assets) != uploaded:
+        raise RuntimeError("Published Release asset list does not match the verified candidate")
 
 
 def main():
     dist = ROOT / "dist"
-    verify_assets(dist)
+    verify_candidate(dist)
     (ROOT / ".build").mkdir(exist_ok=True)
     (ROOT / ".build/release-notes.md").write_text(
         release_notes(os.environ["GITHUB_REPOSITORY"]))

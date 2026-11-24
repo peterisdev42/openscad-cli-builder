@@ -34,6 +34,7 @@ VCPKG_COMMIT = "6f7ffeb18f99796233b958aaaf14ec7bd4fb64b2"
 MESA_VERSION = "24.3.4"
 WINDOWS_UNICODE_SOURCE_TAG = "openscad-2026.11-RC0"
 WINDOWS_UNICODE_PATCH = HERE / "patches/windows-unicode-rc0.patch"
+GIT_SOURCE_CONFIG = ("-c", "core.autocrlf=false", "-c", "core.eol=lf")
 MESA_SHA256 = "e641ae27191d387599219694560d221b7feaa91c900bcec46bf444218ed66025"
 NATIVE_TARGETS = ("macos-x64", "macos-arm64", "windows-x64", "linux-x64", "linux-arm64")
 TARGETS = (*NATIVE_TARGETS, "wasm")
@@ -217,18 +218,25 @@ def patch_windows_unicode(source, commit):
         else:
             data = path.read_bytes()
             blob = b"blob " + str(len(data)).encode("ascii") + b"\0" + data
-            if hashlib.sha1(blob).hexdigest() != expected:
-                raise RuntimeError(f"Unexpected Windows Unicode patch preimage: {name}")
+            actual = hashlib.sha1(blob).hexdigest()
+            if actual != expected:
+                crlf = data.count(b"\r\n")
+                raise RuntimeError(f"Unexpected Windows Unicode patch preimage: {name} "
+                                   f"(expected blob {expected}, actual blob {actual}, "
+                                   f"SHA256 {hashlib.sha256(data).hexdigest()}, CRLF lines {crlf})")
     # A source copy under .build must be treated as a standalone directory.
     env = dict(os.environ, GIT_CEILING_DIRECTORIES=source.parent.resolve().as_posix())
-    run("git", "apply", "--check", "--whitespace=error-all", WINDOWS_UNICODE_PATCH, cwd=source, env=env)
-    run("git", "apply", "--whitespace=error-all", WINDOWS_UNICODE_PATCH, cwd=source, env=env)
+    run("git", *GIT_SOURCE_CONFIG, "apply", "--check", "--whitespace=error-all", WINDOWS_UNICODE_PATCH,
+        cwd=source, env=env)
+    run("git", *GIT_SOURCE_CONFIG, "apply", "--whitespace=error-all", WINDOWS_UNICODE_PATCH,
+        cwd=source, env=env)
 
 
 def archive_source(repo, destination):
     destination.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryFile() as stream:
-        run("git", "-C", repo, "archive", "HEAD", stdout=stream)
+        # git archive uses working-tree conversions, including core.autocrlf.
+        run("git", "-C", repo, *GIT_SOURCE_CONFIG, "archive", "HEAD", stdout=stream)
         stream.seek(0)
         with tarfile.open(fileobj=stream) as archive:
             archive.extractall(destination)

@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
+import zipfile
 
 import windows_unicode_probe as probe
 
@@ -78,6 +79,42 @@ class WindowsUnicodeTest(unittest.TestCase):
         self.assertFalse(probe.all_pass(results[:-1]))
         results[2]["status"] = "wrong_geometry"
         self.assertFalse(probe.all_pass(results))
+
+    def test_release_acceptance_requires_both_matching_native_reports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / f"{probe.PACKAGE}.zip"
+            executable = root / "openscad.exe"
+            executable.write_bytes(b"test executable")
+            tag, source, builder, run_id = "openscad-2026.11-RC0", probe.RC0_COMMIT, "a" * 40, "123"
+            info = {"tag": tag, "commit": source, "builder_commit": builder, "target": "windows-x64"}
+            with zipfile.ZipFile(archive, "w") as stream:
+                stream.writestr(f"{probe.PACKAGE}/build-info.json", json.dumps(info))
+                stream.write(executable, f"{probe.PACKAGE}/bin/openscad.exe")
+            report = {"schema": probe.SCHEMA, "status": "pass", "build_info": info,
+                      "zip_sha256": probe.sha256(archive), "exe_sha256": probe.sha256(executable),
+                      "cases": [{"id": case.id, "status": "pass"} for case in probe.CASES]}
+            for image in probe.ACCEPTANCE_RUNNERS:
+                report["runner"] = {"os": "Windows", "job_runner": image,
+                                    "run_id": run_id, "workflow_sha": builder}
+                report_path = root / f"{image}.json"
+                report_path.write_text(json.dumps(report))
+            probe.verify_acceptance(archive, root, tag, source, builder, run_id)
+            report_path.unlink()
+            with self.assertRaises(FileNotFoundError):
+                probe.verify_acceptance(archive, root, tag, source, builder, run_id)
+            for field, value, error in (
+                ("zip_sha256", "different", "provenance mismatch"),
+                ("exe_sha256", "different", "provenance mismatch"),
+                ("build_info", {**info, "commit": "b" * 40}, "provenance mismatch"),
+                ("runner", {**report["runner"], "workflow_sha": "b" * 40}, "provenance mismatch"),
+                ("runner", {**report["runner"], "job_runner": "windows-2022"}, "provenance mismatch"),
+                ("cases", report["cases"][:-1], "Incomplete Unicode acceptance"),
+            ):
+                with self.subTest(field=field, value=value):
+                    report_path.write_text(json.dumps({**report, field: value}))
+                    with self.assertRaisesRegex(RuntimeError, error):
+                        probe.verify_acceptance(archive, root, tag, source, builder, run_id)
 
     def test_non_windows_writes_not_run_report_and_fails(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(probe.sys, "platform", "darwin"):

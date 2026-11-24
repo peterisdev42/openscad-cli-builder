@@ -29,6 +29,7 @@ RC0_COMMIT = "9ba0cee7c94785fac0ca8dfe040b965a12a25ed1"
 BASELINE_ZIP = "8e17ce1f39a6b32ad6c710076f86037a74fda27c4110c70f613c649945c7c436"
 BASELINE_EXE = "d1c8cc1b86a8b08794429892d1247221831e19f00911560496abed5b5d010a01"
 PACKAGE = "openscad-cli-windows-x86_64"
+ACCEPTANCE_RUNNERS = ("windows-2022", "windows-2025")
 
 
 @dataclass(frozen=True)
@@ -231,6 +232,7 @@ def runner_info():
     return {"os": "Windows", "windows_build": windows.build, "platform": platform.version(),
             "architecture": platform.machine(), "python": platform.python_version(), "git": git_version,
             "msvc_tools": os.environ.get("VCToolsVersion"), "image": os.environ.get("ImageOS"),
+            "job_runner": os.environ.get("SCAD_WINDOWS_RUNNER"),
             "image_version": os.environ.get("ImageVersion"), "run_id": os.environ.get("GITHUB_RUN_ID"),
             "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"), "workflow_sha": os.environ.get("GITHUB_SHA")}
 
@@ -290,6 +292,34 @@ def run_probe(executable, output, archive=None, baseline=False, timeout=DEFAULT_
     finally:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        for result in report["cases"]:
+            print(f"{result['id']} {result['status']}", flush=True)
+        print(f"Unicode probe: {report['status']} ({output})", flush=True)
+
+
+def verify_acceptance(archive, reports, source_tag, source_commit, builder_commit, run_id):
+    if not re.fullmatch(r"[a-f0-9]{40}", builder_commit) or not re.fullmatch(r"\d+", run_id):
+        raise RuntimeError("Missing immutable Windows acceptance provenance")
+    archive_hash = sha256(archive)
+    with zipfile.ZipFile(archive) as stream:
+        info = json.loads(stream.read(f"{PACKAGE}/build-info.json"))
+        executable_hash = hashlib.sha256(stream.read(f"{PACKAGE}/bin/openscad.exe")).hexdigest()
+    if (info.get("tag"), info.get("commit"), info.get("builder_commit"), info.get("target")) != (
+        source_tag, source_commit, builder_commit, "windows-x64"
+    ):
+        raise RuntimeError("Unexpected Windows ZIP provenance")
+    for image in ACCEPTANCE_RUNNERS:
+        report = json.loads((reports / f"{image}.json").read_text(encoding="utf-8"))
+        runner = report.get("runner", {})
+        if (report.get("schema") != SCHEMA or report.get("status") != "pass"
+                or not all_pass(report.get("cases", []))):
+            raise RuntimeError(f"Incomplete Unicode acceptance for {image}")
+        if (report.get("zip_sha256") != archive_hash or report.get("exe_sha256") != executable_hash
+                or report.get("build_info") != info or runner.get("os") != "Windows"
+                or runner.get("job_runner") != image or runner.get("run_id") != run_id
+                or runner.get("workflow_sha") != builder_commit):
+            raise RuntimeError(f"Unicode acceptance provenance mismatch for {image}")
+    print(f"Verified both Windows Unicode reports for ZIP SHA256 {archive_hash}", flush=True)
 
 
 def main():
