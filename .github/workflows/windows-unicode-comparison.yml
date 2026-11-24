@@ -42,7 +42,7 @@ jobs:
       - name: Isolate smoke model operations
         if: always()
         shell: pwsh
-        run: python scripts/openscad-ci/diagnostics/candidate_inputs.py
+        run: python -X utf8 scripts/openscad-ci/diagnostics/candidate_inputs.py
       - uses: actions/upload-artifact@v6
         if: always()
         with:
