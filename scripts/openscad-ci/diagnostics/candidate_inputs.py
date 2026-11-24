@@ -33,8 +33,9 @@ with tempfile.TemporaryDirectory(prefix="scad-diagnostics-", dir=os.environ["RUN
 
     debugger = Path(os.environ["ProgramFiles(x86)"]) / "Windows Kits/10/Debuggers/x64/cdb.exe"
     if debugger.is_file():
-        command = "sxe eh; g; .exr -1; k; q"
+        commands = root / "cdb.cmd"
+        commands.write_text('sxe -c ".exr -1; k; gn" eh\ng\n.exr -1\nk\nq\n', encoding="ascii")
         with Path("cdb.log").open("wb") as log:
-            subprocess.run([debugger, "-c", command, executable, "-o", root / "cdb.stl",
-                            root / "smoke-模型.scad"], cwd=root, env=env, stdout=log,
+            subprocess.run([debugger, "-cf", commands, executable, "-o", root / "cdb.stl",
+                            root / "mcad-模型.scad"], cwd=root, env=env, stdout=log,
                            stderr=subprocess.STDOUT, timeout=90, check=False)
