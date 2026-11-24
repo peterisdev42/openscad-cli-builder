@@ -54,7 +54,7 @@ index 1eb079ef54fba4a20aa557be63a4e03c2358903d..83cc9b9cf0a4fab9178f0ed3badd81e1
        }
      }
 diff --git a/src/core/AST.cc b/src/core/AST.cc
-index 9a3c6263499261fa0a78570ab5f8c1deaadbb0fc..795f2b5ca161f26071c215cdfe8cb511823fe001 100644
+index 9a3c6263499261fa0a78570ab5f8c1deaadbb0fc..211392ccf77f56b151a5a25b47182add0f7de693 100644
 --- a/src/core/AST.cc
 +++ b/src/core/AST.cc
 @@ -1,3 +1,5 @@
@@ -63,7 +63,15 @@ index 9a3c6263499261fa0a78570ab5f8c1deaadbb0fc..795f2b5ca161f26071c215cdfe8cb511
  #include "core/AST.h"
 
  #include <filesystem>
-@@ -30,7 +32,7 @@ bool Location::isNone() const
+@@ -27,10 +29,15 @@
+   return ((*this) == Location::NONE);
+ }
+
++std::string Location::fileName() const
++{
++  return path ? WindowsPath::genericUtf8(*path) : "";
++}
++
  std::string Location::toRelativeString(const std::string& docPath) const
  {
    if (this->isNone()) return "location unknown";
@@ -72,6 +80,19 @@ index 9a3c6263499261fa0a78570ab5f8c1deaadbb0fc..795f2b5ca161f26071c215cdfe8cb511
           std::to_string(this->firstLine());
  }
 
+diff --git a/src/core/AST.h b/src/core/AST.h
+index e96735a3412918531621d71996001da7f4d21d4a..29a545d6c1ebefeb7e3b8db946fcbb8940bee4a0 100644
+--- a/src/core/AST.h
++++ b/src/core/AST.h
+@@ -21,7 +21,7 @@
+   {
+   }
+
+-  [[nodiscard]] std::string fileName() const { return path ? path->generic_string() : ""; }
++  [[nodiscard]] std::string fileName() const;
+   [[nodiscard]] const fs::path& filePath() const
+   {
+     static const fs::path empty_path;
 diff --git a/src/core/ImportNode.cc b/src/core/ImportNode.cc
 index c762976fbe4342037d80776e6bb7975d6550e888..9d9e433a3e04b7b201ef31628a34ee8c28e5f663 100644
 --- a/src/core/ImportNode.cc
