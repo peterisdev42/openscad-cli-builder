@@ -73,7 +73,7 @@ index 9a3c6263499261fa0a78570ab5f8c1deaadbb0fc..795f2b5ca161f26071c215cdfe8cb511
  }
 
 diff --git a/src/core/ImportNode.cc b/src/core/ImportNode.cc
-index c762976fbe4342037d80776e6bb7975d6550e888..0a273e0b80402451d9cabcfe543e310aace66b3b 100644
+index c762976fbe4342037d80776e6bb7975d6550e888..9d9e433a3e04b7b201ef31628a34ee8c28e5f663 100644
 --- a/src/core/ImportNode.cc
 +++ b/src/core/ImportNode.cc
 @@ -24,6 +24,8 @@
@@ -122,7 +122,7 @@ index c762976fbe4342037d80776e6bb7975d6550e888..0a273e0b80402451d9cabcfe543e310a
  {
    std::ostringstream stream;
 -  fs::path path((std::string)this->filename);
-+  const auto path = fs::u8path(this->filename);
++  const auto path = fs::u8path(static_cast<std::string>(this->filename));
 
    stream << this->name();
    stream << "(file = " << this->filename;
