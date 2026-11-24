@@ -1,119 +1,54 @@
-name: Windows Unicode same-source comparison
+name: Windows Unicode candidate ZIP diagnostics
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/windows-unicode-comparison.yml
-      - scripts/openscad-ci/diagnostics/**
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
-  msvc-boundaries:
-    runs-on: windows-2022
-    timeout-minutes: 15
+  candidate:
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.image }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - name: Initialize MSVC tools
-        shell: pwsh
-        env:
-          BUILD_ARCH: x64
-        run: ./scripts/openscad-ci/windows-tools.ps1
-      - name: Compare CRT and filesystem boundary behavior
-        shell: pwsh
-        run: |
-          cl.exe /nologo /EHsc /std:c++20 /Bv /Fe:unicode-boundaries.exe scripts/openscad-ci/diagnostics/windows_unicode_boundaries.cc /link /SUBSYSTEM:CONSOLE /ENTRY:wmainCRTStartup
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $PSNativeCommandUseErrorActionPreference = $false
-          $failed = $false
-          foreach ($leaf in @('ascii', '项目 A', 'café model', '模型🧀')) {
-            $path = (New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP "$leaf-boundaries")).FullName
-            $env:OPENSCADPATH = $path
-            "fixture=$leaf" | Tee-Object -FilePath msvc-boundaries.log -Append
-            ./unicode-boundaries.exe $path | Tee-Object -FilePath msvc-boundaries.log -Append
-            $code = $LASTEXITCODE
-            ('exit={0} hex=0x{0:X8}' -f $code) | Tee-Object -FilePath msvc-boundaries.log -Append
-            if ($code -ne 0) { $failed = $true }
-          }
-          if ($failed) { throw 'One or more wide/UTF-8 boundary controls failed' }
-      - uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: msvc-boundaries
-          path: msvc-boundaries.log
-
-  independent:
-    name: Official source with independent MSYS2 UCRT64 toolchain
-    runs-on: windows-2025
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - uses: actions/checkout@v5
-        with:
-          repository: openscad/openscad
-          ref: 9ba0cee7c94785fac0ca8dfe040b965a12a25ed1
-          submodules: recursive
-          path: upstream
-          persist-credentials: false
-      - name: Resolve upstream's MSYS2 dependencies
-        shell: bash
-        run: |
-          cd upstream
-          test "$(git rev-parse HEAD)" = 9ba0cee7c94785fac0ca8dfe040b965a12a25ed1
-          bash scripts/msys2-install-dependencies.sh qt5
-      - uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          update: true
-          install: libxml2
-          pacboy: ${{ env.PACBOY_PACKAGES }}
-      - uses: ssciwr/setup-mesa-dist-win@v3
-        with:
-          version: '22.1.7'
-          build-type: 'release-mingw'
-      - name: Build untouched source with the upstream MinGW build method
-        shell: msys2 {0}
-        run: |
-          set -euo pipefail
-          g++ --version | tee independent-tools.log
-          cmake --version | tee -a independent-tools.log
-          pacman -Q >> independent-tools.log
-          cmake -S upstream -B build-independent -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DOPENSCAD_VERSION=2026.11-RC0 -DHEADLESS=ON -DNULLGL=OFF -DUSE_QT6=OFF \
-            -DENABLE_TESTS=OFF -DENABLE_GUI_TESTS=OFF -DUSE_MIMALLOC=OFF
-          cmake --build build-independent --target OpenSCADExe winconsole --parallel 2
-          test -f build-independent/winconsole/openscad.com
-          cmake --install build-independent --prefix "$PWD/independent"
-          mkdir -p independent/bin
-          if [[ -f independent/openscad.exe ]]; then
-            mv independent/openscad.exe independent/bin/
-          fi
-          test -f independent/bin/openscad.exe
-          ldd independent/bin/openscad.exe | tee independent-dlls.log
-          while IFS= read -r dll; do
-            cp "$dll" independent/bin/
-          done < <(awk '$3 ~ /^\/ucrt64\/bin\// {print $3}' independent-dlls.log)
-          printf '%s\n' '{"tag":"openscad-2026.11-RC0","commit":"9ba0cee7c94785fac0ca8dfe040b965a12a25ed1","target":"windows-x64","toolchain":"MSYS2 UCRT64 GCC","builder_patches":false,"headless":true,"opengl":true}' > independent/build-info.json
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           architecture: x64
-      - name: Run the native independent candidate
+      - uses: actions/download-artifact@v7
+        with:
+          name: logs-windows-x64
+          github-token: ${{ github.token }}
+          run-id: 45353591562
+          path: prior
+      - name: Confirm original candidate and run all 15 probe cases
+        env:
+          SCAD_WINDOWS_RUNNER: ${{ matrix.image }}
         shell: pwsh
         run: |
-          python scripts/openscad-ci/windows_unicode_probe.py --executable (Resolve-Path independent/bin/openscad.exe).Path --output independent-report.json
+          $zip = 'prior/dist/openscad-cli-windows-x86_64.zip'
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne 'f9b5e32ce9379a2ac2b4631eb3dd0d7173b31f298ecaf9d0f2386dee0f8dd342') {
+            throw 'ZIP SHA256 mismatch'
+          }
+          python scripts/openscad-ci/windows_unicode_probe.py --archive $zip --output native-report.json
+      - name: Isolate smoke model operations
+        if: always()
+        shell: pwsh
+        run: python scripts/openscad-ci/diagnostics/candidate_inputs.py
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: independent-evidence
+          name: diagnostic-zip-${{ matrix.image }}
           path: |
-            independent-report.json
-            independent/build-info.json
-            independent-*.log
-            build-independent/CMakeCache.txt
+            native-report.json
+            input-report.json
+            cdb.log
+          if-no-files-found: error
