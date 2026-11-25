@@ -1,12 +1,8 @@
 name: Build and Release OpenSCAD CLI
 run-name: >-
-  ${{ github.event_name == 'push' && 'Bootstrap latest stable' || inputs.expected_snapshot_tag || inputs.source_tag || 'Validate OpenSCAD CLI' }}
+  ${{ inputs.expected_snapshot_tag || inputs.source_tag || 'Validate OpenSCAD CLI' }}
 
 on:
-  # Bootstrap the first stable build on the upstream submodule migration.
-  push:
-    branches: [main]
-    paths: ['.gitmodules', 'scripts/openscad-ci/test_unified_rc0_release.py']
   pull_request:
     paths:
       - .github/workflows/openscad-cli.yml
@@ -34,7 +30,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: openscad-cli-${{ github.ref }}-${{ github.event_name == 'push' && 'latest-stable' || inputs.expected_snapshot_tag || inputs.source_tag || 'pr' }}
+  group: openscad-cli-${{ github.ref }}-${{ inputs.expected_snapshot_tag || inputs.source_tag || 'pr' }}
   cancel-in-progress: false
 
 env:
@@ -57,7 +53,7 @@ jobs:
         id: source
         shell: bash
         env:
-          SELECTED_SOURCE: ${{ github.event_name == 'push' && 'latest-stable' || github.event_name == 'pull_request' && 'openscad-2026.11-RC0' || inputs.source_tag || 'latest-snapshot' }}
+          SELECTED_SOURCE: ${{ github.event_name == 'pull_request' && 'openscad-2026.11-RC0' || inputs.source_tag || 'latest-snapshot' }}
           EXPECTED_COMMIT: ${{ inputs.expected_commit }}
           EXPECTED_SNAPSHOT_TAG: ${{ inputs.expected_snapshot_tag }}
           GH_TOKEN: ${{ github.token }}
@@ -397,5 +393,5 @@ jobs:
         if: github.ref_name == github.event.repository.default_branch
         env:
           GH_TOKEN: ${{ github.token }}
-          OPENSCAD_SKIP_EXISTING: ${{ github.event_name == 'push' || inputs.skip_existing }}
+          OPENSCAD_SKIP_EXISTING: ${{ inputs.skip_existing }}
         run: python3 scripts/openscad-ci/release.py --publish

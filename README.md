@@ -14,9 +14,8 @@ The old standalone Preview Exporter workflow has been retired. See [Preview Expo
 
 ## Upstream discovery
 
-The submodule and build checkouts use `openscad/openscad`. The first migration
-push to main touching `.gitmodules` requests the latest official stable release;
-subsequent manual builds accept an official tag, `latest-stable`, or
+The submodule and build checkouts use `openscad/openscad`. Manual builds
+accept an official tag, `latest-stable`, or
 `latest-snapshot`. All build jobs consume the resolved immutable commit.
 
 Run **Discover Upstream OpenSCAD** manually with `dispatch_builds` unchecked

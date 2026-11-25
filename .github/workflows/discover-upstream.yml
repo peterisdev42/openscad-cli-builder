@@ -1,9 +1,5 @@
 name: Discover Upstream OpenSCAD
 on:
-  # One-time read-only integration test; removed after bootstrap.
-  push:
-    branches: [main]
-    paths: ['.github/workflows/discover-upstream.yml']
   workflow_dispatch:
     inputs:
       dispatch_builds:
