@@ -23,7 +23,8 @@ to inspect the latest stable (GitHub Releases), RC and TEST (official Git
 tags), and Snapshot (official website metadata) together. Check
 `dispatch_builds` to request all missing latest-channel releases. Existing
 release metadata is compared before dispatch; conflicts require manual review.
-An active build defers discovery dispatch. Historical versions are not backfilled.
+Active or queued builds suppress only their own version; other channels can
+build concurrently. Historical versions are not backfilled.
 A snapshot that advances between discovery and resolution fails safely.
 
 After successful manual discovery and end-to-end dispatched builds, uncomment
