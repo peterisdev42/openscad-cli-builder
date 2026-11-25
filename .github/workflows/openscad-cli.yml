@@ -6,7 +6,7 @@ on:
   # Bootstrap the first stable build on the upstream submodule migration.
   push:
     branches: [main]
-    paths: ['.gitmodules']
+    paths: ['.gitmodules', 'scripts/openscad-ci/test_unified_rc0_release.py']
   pull_request:
     paths:
       - .github/workflows/openscad-cli.yml

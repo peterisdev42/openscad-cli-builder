@@ -1,6 +1,7 @@
 """RC0 must publish a single CLI Release with the six normal targets and the
 macOS ARM64 Preview Exporter as the seventh downloadable package type.
 """
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -27,7 +28,9 @@ class UnifiedReleaseTests(unittest.TestCase):
 
     def test_rc0_release_notes_include_yaml_and_seventh_package(self):
         with patch.object(release, "SOURCE_TAG", "openscad-2026.11-RC0"), \
-             patch.object(release, "VERSION", "2026.11-RC0"):
+             patch.object(release, "VERSION", "2026.11-RC0"), \
+             patch.object(release, "RELEASE_TAG", "openscad-2026.11-RC0"), \
+             patch.dict(os.environ, {"OPENSCAD_SNAPSHOT": "false"}):
             body = release.release_notes("peterisdev42/openscad-cli-builder")
             self.assertTrue(body.startswith("```yaml\nschemaVersion: 1\n"))
             self.assertIn('version: "2026.11-RC0"', body)
