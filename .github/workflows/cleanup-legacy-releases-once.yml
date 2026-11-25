@@ -1,0 +1,112 @@
+name: One-time legacy release cleanup
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/cleanup-legacy-releases-once.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Delete old release records, including orphaned releases
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          if repo != "peterisdev42/openscad-cli-builder":
+              raise RuntimeError("Unexpected repository")
+          cutoff = "2026-11-25T06:15:00Z"
+          base = "https://api.github.com/repos/" + repo
+          headers = {"Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                     "Accept": "application/vnd.github+json",
+                     "X-GitHub-Api-Version": "2022-11-28",
+                     "User-Agent": "openscad-cli-builder-release-cleanup"}
+
+          def request(path, method="GET"):
+              try:
+                  with urlopen(Request(base + path, method=method, headers=headers), timeout=30) as response:
+                      body = response.read()
+                      return json.loads(body) if body else None
+              except HTTPError as error:
+                  if error.code == 404:
+                      return None
+                  raise
+
+          def listed_releases():
+              page = 1
+              while True:
+                  releases = request(f"/releases?per_page=100&page={page}")
+                  if releases is None:
+                      raise RuntimeError("Release list unavailable")
+                  yield from releases
+                  if len(releases) < 100:
+                      break
+                  page += 1
+
+          def is_old(release):
+              dates = [release.get(k) for k in ("created_at", "updated_at", "published_at")]
+              return bool(dates[0]) and all(d < cutoff for d in dates if d)
+
+          known = {426341747: "openscad-2021.01", 426353945: "openscad-2026.10-TEST4",
+                   431147217: "openscad-2026.11-RC0"}
+          candidates = {r["id"] for r in listed_releases()} | set(known)
+          latest = request("/releases/latest")
+          if latest:
+              candidates.add(latest["id"])
+          deleted, preserved = [], []
+
+          def clean(release_id):
+              release = request(f"/releases/{release_id}")
+              if release is None:
+                  print(f"Absent: {release_id}")
+                  return False
+              tag = release["tag_name"]
+              if release_id in known and known[release_id] != tag:
+                  raise RuntimeError(f"Unexpected tag for release {release_id}: {tag}")
+              if not is_old(release):
+                  print(f"Preserved newer release: {tag} ({release_id})")
+                  preserved.append((release_id, tag))
+                  return False
+              request(f"/releases/{release_id}", "DELETE")
+              if request(f"/releases/{release_id}") is not None:
+                  raise RuntimeError(f"Release still exists: {release_id}")
+              print(f"Deleted old release: {tag} ({release_id}); assets={len(release['assets'])}")
+              deleted.append((release_id, tag))
+              return True
+
+          for release_id in sorted(candidates):
+              clean(release_id)
+          # Some orphaned releases are absent from the collection but exposed as Latest.
+          for _ in range(100):
+              latest = request("/releases/latest")
+              if not latest or not is_old(latest):
+                  break
+              if not clean(latest["id"]):
+                  raise RuntimeError("Old Latest release could not be removed")
+          else:
+              raise RuntimeError("Too many orphaned Latest records")
+          remaining = list(listed_releases())
+          if any(is_old(r) for r in remaining):
+              raise RuntimeError("Old listed releases remain")
+          for release_id in known:
+              remaining_release = request(f"/releases/{release_id}")
+              if remaining_release and is_old(remaining_release):
+                  raise RuntimeError(f"Old known release remains: {release_id}")
+          print(f"Verified: deleted={len(deleted)}, listed_remaining={len(remaining)}, preserved={len(preserved)}")
+          print("Tags were not changed.")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("## Legacy Release cleanup\n\n")
+              for rid, tag in deleted:
+                  summary.write(f"- Deleted {tag} (ID {rid})\n")
+              summary.write(f"\nDeleted: {len(deleted)}; remaining listed: {len(remaining)}.\n")
+          PY
