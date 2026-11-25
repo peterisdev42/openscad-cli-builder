@@ -1,0 +1,41 @@
+name: Discover Upstream OpenSCAD
+on:
+  workflow_dispatch:
+    inputs:
+      dispatch_builds:
+        description: Dispatch missing CLI releases (unchecked = discovery only)
+        type: boolean
+        default: false
+  # Enable only after manual discovery and dispatched builds are verified:
+  # schedule:
+  #   - cron: '0 0 * * *'
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: openscad-upstream-discovery
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Test discovery
+        run: python3 -m unittest discover -s scripts/openscad-ci -p 'test_upstream_versions.py' -v
+      - name: Discover all release channels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPATCH_BUILDS: ${{ github.event_name == 'schedule' || inputs.dispatch_builds }}
+        run: |
+          if [[ "$DISPATCH_BUILDS" == true ]]; then
+            test "$GITHUB_REF_NAME" = "${{ github.event.repository.default_branch }}"
+            python3 scripts/openscad-ci/discover_upstream.py --dispatch
+          else
+            python3 scripts/openscad-ci/discover_upstream.py
+          fi

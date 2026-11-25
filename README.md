@@ -11,3 +11,23 @@ The regular [OpenSCAD CLI workflow](.github/workflows/openscad-cli.yml) builds a
 The Preview Exporter is built in the existing macOS ARM64 job, using the **same pinned upstream commit** and installed vcpkg dependencies but a separate copied source / CMake build tree. If any of the 14 required assets is missing or fails validation, the unified RC0 release is not published. Other OpenSCAD tags continue to produce their original 12 assets.
 
 The old standalone Preview Exporter workflow has been retired. See [Preview Exporter](scripts/openscad-ci/preview_exporter/README.md) for usage and integration notes.
+
+## Upstream discovery
+
+The submodule and build checkouts use `openscad/openscad`. The first migration
+push to main touching `.gitmodules` requests the latest official stable release;
+subsequent manual builds accept an official tag, `latest-stable`, or
+`latest-snapshot`. All build jobs consume the resolved immutable commit.
+
+Run **Discover Upstream OpenSCAD** manually with `dispatch_builds` unchecked
+to inspect the latest stable (GitHub Releases), RC and TEST (official Git
+tags), and Snapshot (official website metadata) together. Check
+`dispatch_builds` to request all missing latest-channel releases. Existing
+release metadata is compared before dispatch; conflicts require manual review.
+An active build defers discovery dispatch. Historical versions are not backfilled.
+A snapshot that advances between discovery and resolution fails safely.
+
+After successful manual discovery and end-to-end dispatched builds, uncomment
+the schedule in `.github/workflows/discover-upstream.yml` to run daily at
+00:00 UTC. Schedule runs automatically dispatch missing releases. No external
+PAT or service is required.

@@ -1,8 +1,12 @@
 name: Build and Release OpenSCAD CLI
 run-name: >-
-  ${{ github.event_name == 'workflow_dispatch' && inputs.source_tag || 'Validate OpenSCAD CLI' }}
+  ${{ github.event_name == 'push' && 'Bootstrap latest stable' || inputs.expected_snapshot_tag || inputs.source_tag || 'Validate OpenSCAD CLI' }}
 
 on:
+  # Bootstrap the first stable build on the upstream submodule migration.
+  push:
+    branches: [main]
+    paths: ['.gitmodules']
   pull_request:
     paths:
       - .github/workflows/openscad-cli.yml
@@ -11,20 +15,27 @@ on:
     inputs:
       source_tag:
         description: OpenSCAD source to build and release
-        type: choice
+        type: string
         default: latest-snapshot
-        options:
-          - latest-snapshot
-          - openscad-2026.11-RC0
-          - openscad-2026.10-TEST4
-          - openscad-2021.01
+      expected_commit:
+        description: Optional expected upstream commit from discovery
+        type: string
+        default: ''
+      expected_snapshot_tag:
+        description: Optional expected snapshot tag from discovery
+        type: string
+        default: ''
+      skip_existing:
+        description: Do not overwrite an existing release (automatic builds)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: openscad-cli-${{ github.ref }}-${{ inputs.source_tag || 'latest-snapshot' }}
-  cancel-in-progress: true
+  group: openscad-cli-${{ github.ref }}-${{ github.event_name == 'push' && 'latest-stable' || inputs.expected_snapshot_tag || inputs.source_tag || 'pr' }}
+  cancel-in-progress: false
 
 env:
   PYTHONUTF8: '1'
@@ -46,29 +57,17 @@ jobs:
         id: source
         shell: bash
         env:
-          SELECTED_SOURCE: ${{ github.event_name != 'workflow_dispatch' && 'openscad-2026.11-RC0' || inputs.source_tag || 'latest-snapshot' }}
+          SELECTED_SOURCE: ${{ github.event_name == 'push' && 'latest-stable' || github.event_name == 'pull_request' && 'openscad-2026.11-RC0' || inputs.source_tag || 'latest-snapshot' }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          EXPECTED_SNAPSHOT_TAG: ${{ inputs.expected_snapshot_tag }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [[ "$SELECTED_SOURCE" == latest-snapshot ]]; then
             sudo apt-get update -qq
             sudo apt-get install -y xvfb xauth libgl1 libegl1 libopengl0 libglx-mesa0 libgl1-mesa-dri
-            python3 scripts/openscad-ci/resolve_snapshot.py >> "$GITHUB_OUTPUT"
-          else
-            case "$SELECTED_SOURCE" in
-              openscad-2021.01) sha=41f58fe57c03457a3a8b4dc541ef5654ec3e8c78 ;;
-              openscad-2026.10-TEST4) sha=5a864f17b6b022904004704f64e6168d2cfb8435 ;;
-              openscad-2026.11-RC0) sha=9ba0cee7c94785fac0ca8dfe040b965a12a25ed1; source_repo=openscad/openscad ;;
-              *) echo "Unsupported source: $SELECTED_SOURCE" >&2; exit 1 ;;
-            esac
-            {
-              echo "tag=$SELECTED_SOURCE"
-              echo "commit=$sha"
-              echo "repo=${source_repo:-peterisdev42/openscad}"
-              echo "snapshot=false"
-              echo "source_url="
-            } >> "$GITHUB_OUTPUT"
           fi
+          python3 scripts/openscad-ci/resolve_source.py >> "$GITHUB_OUTPUT"
       - name: Record resolved revision
         env:
           SOURCE_TAG: ${{ steps.source.outputs.tag }}
@@ -95,6 +94,7 @@ jobs:
           repository: ${{ needs.resolve.outputs.repo }}
           ref: ${{ needs.resolve.outputs.commit }}
           path: sources/openscad
+          fetch-depth: 0
       - run: python3 -m unittest discover -s scripts/openscad-ci -p 'test_*.py' -v
 
   build:
@@ -397,4 +397,5 @@ jobs:
         if: github.ref_name == github.event.repository.default_branch
         env:
           GH_TOKEN: ${{ github.token }}
+          OPENSCAD_SKIP_EXISTING: ${{ github.event_name == 'push' || inputs.skip_existing }}
         run: python3 scripts/openscad-ci/release.py --publish

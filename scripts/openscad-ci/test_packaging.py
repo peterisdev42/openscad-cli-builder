@@ -200,7 +200,10 @@ class PackagingTests(unittest.TestCase):
         if os.environ.get("OPENSCAD_SNAPSHOT") == "true":
             self.assertTrue((ROOT / "scripts/openscad-ci/resolve_snapshot.py").is_file())
         else:
-            self.assertIn(commit, workflow)
+            self.assertTrue((ROOT / "scripts/openscad-ci/resolve_source.py").is_file())
+            self.assertEqual(commit, subprocess.check_output([
+                "git", "-C", str(ROOT / "sources/openscad"), "rev-parse",
+                f"refs/tags/{SOURCE_TAG}^{{commit}}"], text=True).strip())
 
     @unittest.skipIf(MODERN_SOURCE, "Legacy patch is exercised when selecting openscad-2021.01")
     def test_patch_applies_to_actual_tag_and_rejects_reapplication(self):

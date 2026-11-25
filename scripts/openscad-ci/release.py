@@ -181,6 +181,8 @@ def publish(dist, notes, repository):
     channel = release_channel(SOURCE_TAG, snapshot=os.environ.get("OPENSCAD_SNAPSHOT") == "true")
     prerelease = channel != "stable"
     latest_arg = "--latest" if not prerelease else "--latest=false"
+    if existing and os.environ.get("OPENSCAD_SKIP_EXISTING") == "true":
+        raise RuntimeError(f"Automatic build refuses to overwrite existing release {RELEASE_TAG}")
     if existing:
         subprocess.check_call(["gh", "release", "upload", RELEASE_TAG, *files, "--clobber", *common])
         subprocess.check_call(["gh", "release", "edit", RELEASE_TAG, "--title", title,
