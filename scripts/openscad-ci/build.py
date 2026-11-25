@@ -11,7 +11,10 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.request
+
+from runtime_resources import check_source_resources, copy_runtime_resources, smoke_library
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
@@ -268,6 +271,7 @@ def install_dependencies(target, triplet):
     portfile.write_text(replace_once(portfile.read_text(),
         "    URLS https://gmplib.org/download/gmp/gmp-6.2.1.tar.xz",
         "    URLS https://ftp.gnu.org/gnu/gmp/gmp-6.2.1.tar.xz\n"
+        "         https://ftpmirror.gnu.org/gmp/gmp-6.2.1.tar.xz\n"
         "         https://gmplib.org/download/gmp/gmp-6.2.1.tar.xz"))
     triplet_dir = HERE / "triplets"
     if not (triplet_dir / f"{triplet}.cmake").is_file():
@@ -328,9 +332,17 @@ endmacro()"""))
     os.environ["PKG_CONFIG_LIBDIR"] = os.pathsep.join(
         str(prefix / item) for item in ("lib/pkgconfig", "share/pkgconfig"))
     try:
-        run(executable, "install", f"--triplet={triplet}",
-            f"--overlay-triplets={triplet_dir}", f"--x-manifest-root={HERE}",
-            f"--x-install-root={installed}", "--clean-after-build")
+        for attempt in range(1, 4):
+            try:
+                run(executable, "install", f"--triplet={triplet}",
+                    f"--overlay-triplets={triplet_dir}", f"--x-manifest-root={HERE}",
+                    f"--x-install-root={installed}", "--clean-after-build")
+                break
+            except subprocess.CalledProcessError:
+                if attempt == 3:
+                    raise
+                print(f"vcpkg install failed (attempt {attempt}/3); retrying with retained downloads", flush=True)
+                time.sleep(15 * attempt)
     except subprocess.CalledProcessError:
         # vcpkg normally only prints the log paths. Include their contents in
         # the job log as well, so failures are diagnosable through the API.
@@ -528,8 +540,7 @@ def stage(source, build, work, target, prefix, mesa):
         resources = package / "share/openscad"
         resources.mkdir(parents=True)
     check_architecture(binary, target)
-    for directory in ("color-schemes", "libraries", "fonts", "examples", *(("shaders", "templates") if MODERN_SOURCE else ())):
-        shutil.copytree(source / directory, resources / directory, dirs_exist_ok=True)
+    copy_runtime_resources(source, resources, MODERN_SOURCE)
     # localization_init() expects the resource directory, and gettext needs
     # compiled catalogs rather than the source .po files.
     for line in (source / "locale/LINGUAS").read_text().splitlines():
@@ -670,7 +681,10 @@ def smoke_test(package, target, work):
     test = work / "smoke"
     test.mkdir()
     model = test / ("unicode-模型.scad" if MODERN_SOURCE else "smoke.scad")
-    model.write_text('use <MCAD/boxes.scad>\n'
+    resources = (package / "OpenSCAD.app/Contents/Resources" if target.startswith("macos")
+                 else package / "bin" if target.startswith("windows") else package / "share/openscad")
+    library = smoke_library(resources, test)
+    model.write_text(f'use <{library}>\n'
                      'difference() { roundedBox([20,20,10],2,true); cylinder(h=30,r=4,center=true,$fn=32); }\n'
                      'translate([0,0,5]) linear_extrude(1) text("CLI",size=4,font="Liberation Sans");\n')
     log = test / "smoke.log"
@@ -757,6 +771,7 @@ def main():
     work.mkdir(parents=True)
     source = work / "source"
     archive_source(repo, source)
+    check_source_resources(source, MODERN_SOURCE)
     for line in output("git", "-C", repo, "submodule", "status", "--recursive").splitlines():
         if line[0] in "-+U":
             raise RuntimeError(f"Submodule is not at its pinned commit: {line}")

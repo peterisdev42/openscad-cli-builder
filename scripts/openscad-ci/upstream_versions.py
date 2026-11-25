@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from resolve_snapshot import SNAPSHOT_INDEX, download, parse_snapshot_metadata
@@ -25,6 +26,18 @@ def api(path):
         headers["Authorization"] = "Bearer " + os.environ["GH_TOKEN"]
     with urlopen(Request("https://api.github.com/" + path, headers=headers), timeout=60) as response:
         return json.load(response)
+
+
+def release_by_tag(repository, tag):
+    """Only a real 404 means absent; fail closed on transport/auth failures."""
+    if not TAG_RE.fullmatch(tag):
+        raise ValueError("Unsupported release lookup tag: " + tag)
+    try:
+        return api(f"repos/{repository}/releases/tags/{tag}")
+    except HTTPError as error:
+        if error.code == 404:
+            return None
+        raise
 
 
 def parse_remote_tags(output):

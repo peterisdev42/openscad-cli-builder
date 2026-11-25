@@ -26,6 +26,12 @@ release metadata is compared before dispatch; conflicts require manual review.
 Active or queued builds suppress only their own version; other channels can
 build concurrently. Historical versions are not backfilled.
 A snapshot that advances between discovery and resolution fails safely.
+Source resource layout and patch compatibility are checked before native builds.
+Newer upstream versions without bundled MCAD use an empty libraries directory
+and a local smoke-test fixture. Older versions retain bundled MCAD testing.
+Vcpkg downloads are cached; install is retried up to three times with the
+original archive hashes unchanged. Orphaned release records are detected by
+an additional direct tag lookup and require manual review.
 
 After successful manual discovery and end-to-end dispatched builds, uncomment
 the schedule in `.github/workflows/discover-upstream.yml` to run daily at

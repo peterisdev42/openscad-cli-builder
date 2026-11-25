@@ -13,6 +13,7 @@ import zipfile
 from build import ROOT, SOURCE_COMMIT, SOURCE_TAG, TARGETS, MODERN_SOURCE, package_name, LINUX_GLIBC_BASELINE
 from wasm import WASM_IMAGE, WASM_CAPABILITIES
 from release_metadata import release_channel, with_release_header
+from upstream_versions import release_by_tag
 
 # The Preview Exporter is a seventh *asset type*, only for the audited RC0
 # release; it must never alter the published asset lists of other source tags.
@@ -173,6 +174,11 @@ def publish(dist, notes, repository):
     releases = json.loads(subprocess.check_output(
         ["gh", "api", "--paginate", "--slurp", f"repos/{repository}/releases?per_page=100"], text=True))
     existing = next((r for page in releases for r in page if r["tag_name"] == RELEASE_TAG), None)
+    direct = release_by_tag(repository, RELEASE_TAG)
+    if existing is None and direct is not None:
+        raise RuntimeError(f"Orphaned or concurrently created release {RELEASE_TAG} (ID {direct['id']}); review before publishing")
+    if existing is not None and direct is not None and existing.get("id") != direct.get("id"):
+        raise RuntimeError(f"Release identity changed during lookup: {RELEASE_TAG}")
     files = [str(dist / name) for name in assets]
     title = release_title_from_commit(SOURCE_TAG, os.environ.get("OPENSCAD_SOURCE_COMMIT_DATE"))
     common = ["--repo", repository]

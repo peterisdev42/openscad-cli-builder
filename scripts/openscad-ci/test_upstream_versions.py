@@ -1,9 +1,10 @@
 import unittest
+from urllib.error import HTTPError
 from unittest.mock import patch
 
 from discover_upstream import (active_build_runs, active_candidate_tags, candidate_status,
                                classify_candidates, dispatch_missing)
-from upstream_versions import discover, parse_remote_tags, resolve_tag
+from upstream_versions import discover, parse_remote_tags, release_by_tag, resolve_tag
 
 
 class UpstreamTests(unittest.TestCase):
@@ -31,6 +32,21 @@ class UpstreamTests(unittest.TestCase):
         self.assertEqual(candidate_status(c, {}), "new")
         self.assertEqual(candidate_status(c, {c["tag"]: {"body": "  commit: " + sha}}), "published")
         self.assertEqual(candidate_status(c, {c["tag"]: {"body": "  commit: " + "b" * 40}}), "conflict")
+
+    def test_release_by_tag_only_swallows_404(self):
+        for code in (404, 403, 500):
+            with self.subTest(code=code), patch("upstream_versions.api", side_effect=HTTPError(
+                    "https://api.github.com/", code, "test", None, None)):
+                if code == 404:
+                    self.assertIsNone(release_by_tag("example/builder", "openscad-2027.01"))
+                else:
+                    with self.assertRaises(HTTPError):
+                        release_by_tag("example/builder", "openscad-2027.01")
+
+    def test_orphaned_release_is_conflict(self):
+        c = {"tag": "openscad-2027.01", "channel": "stable", "commit": "a" * 40}
+        self.assertEqual(candidate_status(c, {c["tag"]: {"_orphaned": True,
+                         "body": "  commit: " + c["commit"]}}), "conflict")
 
     def test_snapshot_guard(self):
         c = {"tag": "openscad-2027.01.01", "channel": "snapshot", "url": "https://files.openscad.org/snapshots/file"}

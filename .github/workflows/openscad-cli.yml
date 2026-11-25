@@ -91,6 +91,13 @@ jobs:
           ref: ${{ needs.resolve.outputs.commit }}
           path: sources/openscad
           fetch-depth: 0
+      - name: Check source compatibility before platform builds
+        run: |
+          if [[ "$OPENSCAD_TAG" == openscad-2021.01 ]]; then
+            python3 scripts/openscad-ci/runtime_resources.py sources/openscad
+          else
+            python3 scripts/openscad-ci/runtime_resources.py sources/openscad --modern
+          fi
       - run: python3 -m unittest discover -s scripts/openscad-ci -p 'test_*.py' -v
 
   build:
@@ -166,15 +173,20 @@ jobs:
         with:
           path: |
             .build/vcpkg-cache
+            .build/vcpkg-downloads
             .build/ccache
           key: openscad-deps-v2-${{ matrix.target }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('scripts/openscad-ci/vcpkg.json', 'scripts/openscad-ci/triplets/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             openscad-deps-v2-${{ matrix.target }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('scripts/openscad-ci/vcpkg.json', 'scripts/openscad-ci/triplets/**') }}-
             openscad-deps-v2-${{ matrix.target }}-${{ env.VCPKG_COMMIT }}-
+      - name: Prepare persistent dependency downloads
+        shell: bash
+        run: mkdir -p .build/vcpkg-downloads
       - name: Build dependencies and CLI; test relocated package
         env:
           TARGET: ${{ matrix.target }}
           TRIPLET: ${{ matrix.triplet }}
+          VCPKG_DOWNLOADS: ${{ github.workspace }}/.build/vcpkg-downloads
           VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.build/vcpkg-cache,readwrite
           CCACHE_DIR: ${{ github.workspace }}/.build/ccache
           CCACHE_BASEDIR: ${{ github.workspace }}
@@ -186,6 +198,7 @@ jobs:
           TRIPLET: arm64-osx
           SCAD_PREVIEW_EXPORTER: '1'
           SCAD_REUSE_VCPKG: '1'
+          VCPKG_DOWNLOADS: ${{ github.workspace }}/.build/vcpkg-downloads
           VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.build/vcpkg-cache,readwrite
           CCACHE_DIR: ${{ github.workspace }}/.build/ccache
           CCACHE_BASEDIR: ${{ github.workspace }}
@@ -211,6 +224,7 @@ jobs:
         with:
           path: |
             .build/vcpkg-cache
+            .build/vcpkg-downloads
             .build/ccache
           key: ${{ steps.dependency-cache.outputs.cache-primary-key }}
       - uses: actions/upload-artifact@v6

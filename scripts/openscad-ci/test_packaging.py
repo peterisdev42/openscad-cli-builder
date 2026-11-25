@@ -87,7 +87,7 @@ class PackagingTests(unittest.TestCase):
                 (dist / name).touch()
             current = {'assets': [{'name': name, 'id': i} for i, name in enumerate(release_assets())]}
             with mock.patch.dict(os.environ, {'GITHUB_REF_NAME': 'main', 'GITHUB_SHA': 'old-build-commit', 'OPENSCAD_SOURCE_COMMIT_DATE': '2026-10-15T02:45:40Z'}), mock.patch(
-                    'release.verify_assets'), mock.patch('release.subprocess.check_output',
+                    'release.verify_assets'), mock.patch('release.release_by_tag', return_value=None), mock.patch('release.subprocess.check_output',
                     side_effect=[json.dumps([[]]), json.dumps(current)]), mock.patch(
                     'release.subprocess.check_call') as command:
                 publish(dist, dist / 'notes.md', 'example/builder')
@@ -104,7 +104,7 @@ class PackagingTests(unittest.TestCase):
             existing = {'tag_name': RELEASE_TAG}
             current = {'assets': [{'name': name, 'id': i} for i, name in enumerate(release_assets())]
                        + [{'name': 'openscad-cli-2021.01-source.tar.gz', 'id': 99}]}
-            with mock.patch.dict(os.environ, {'OPENSCAD_SOURCE_COMMIT_DATE': '2026-10-15T02:45:40Z'}), mock.patch('release.verify_assets'), mock.patch(
+            with mock.patch.dict(os.environ, {'OPENSCAD_SOURCE_COMMIT_DATE': '2026-10-15T02:45:40Z'}), mock.patch('release.verify_assets'), mock.patch('release.release_by_tag', return_value=existing), mock.patch(
                     'release.subprocess.check_output', side_effect=[json.dumps([[existing]]), json.dumps(current)]), mock.patch(
                     'release.subprocess.check_call') as command:
                 publish(dist, dist / 'notes.md', 'example/builder')
@@ -112,12 +112,25 @@ class PackagingTests(unittest.TestCase):
                 self.assertEqual(calls[-1], ['gh', 'api', '--method', 'DELETE',
                                             'repos/example/builder/releases/assets/99'])
                 self.assertNotIn(str(dist / 'openscad-cli-2021.01-source.tar.gz'), calls[0])
-            with mock.patch.dict(os.environ, {'OPENSCAD_SOURCE_COMMIT_DATE': '2026-10-15T02:45:40Z'}), mock.patch('release.verify_assets'), mock.patch(
+            with mock.patch.dict(os.environ, {'OPENSCAD_SOURCE_COMMIT_DATE': '2026-10-15T02:45:40Z'}), mock.patch('release.verify_assets'), mock.patch('release.release_by_tag', return_value=existing), mock.patch(
                     'release.subprocess.check_output', return_value=json.dumps([[existing]])), mock.patch(
                     'release.subprocess.check_call', side_effect=subprocess.CalledProcessError(1, 'gh')) as command:
                 with self.assertRaises(subprocess.CalledProcessError):
                     publish(dist, dist / 'notes.md', 'example/builder')
                 self.assertEqual(command.call_count, 1)
+
+    def test_orphaned_release_is_never_overwritten(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dist = Path(directory)
+            for name in release_assets():
+                (dist / name).touch()
+            with mock.patch('release.verify_assets'), mock.patch(
+                    'release.subprocess.check_output', return_value=json.dumps([[]])), mock.patch(
+                    'release.release_by_tag', return_value={'id': 123, 'tag_name': RELEASE_TAG}), mock.patch(
+                    'release.subprocess.check_call') as command:
+                with self.assertRaisesRegex(RuntimeError, "Orphaned or concurrently created release"):
+                    publish(dist, dist / 'notes.md', 'example/builder')
+                command.assert_not_called()
 
     def test_windows_runtime_collection_follows_transitive_imports_and_toolset(self):
         with tempfile.TemporaryDirectory() as directory:

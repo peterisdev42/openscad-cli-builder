@@ -10,6 +10,8 @@ import subprocess
 import sys
 import urllib.request
 
+from runtime_resources import check_source_resources, copy_runtime_resources, smoke_library
+
 from build import (ROOT, HERE, SOURCE_TAG, SOURCE_COMMIT, SOURCE_VERSION, MODERN_SOURCE,
                    archive_source, output, patch_legacy_source, replace_once, run)
 
@@ -96,8 +98,7 @@ def stage_wasm(source, build, work):
     shutil.copy2(HERE / "wasm-cli.mjs", binary / "openscad.mjs")
     resources = package / "share/openscad"
     resources.mkdir(parents=True)
-    for directory in ("libraries", "fonts", "color-schemes", "examples"):
-        shutil.copytree(source / directory, resources / directory)
+    copy_runtime_resources(source, resources, MODERN_SOURCE, wasm=True)
     # Use CPython's pinned catalog compiler so packaging has no host gettext
     # dependency (the native Windows path uses the same verified compiler).
     compiler = work / "msgfmt.py"
@@ -149,7 +150,8 @@ def smoke_wasm(package, work):
     test.mkdir(parents=True)
     (test / "shape.scad").write_text('module shape() { cube([12,10,8]); }\n')
     model = test / "unicode-模型.scad"
-    model.write_text('use <MCAD/boxes.scad>\nuse <shape.scad>\n'
+    library = smoke_library(package / "share/openscad", test)
+    model.write_text(f'use <{library}>\nuse <shape.scad>\n'
                      'difference() { roundedBox([12,10,8],1,true); cylinder(h=20,r=2,$fn=24); }\n'
                      'translate([15,0,0]) shape();\n'
                      'translate([0,0,8]) linear_extrude(1) text("CLI",font="Liberation Sans",size=3);\n')
@@ -217,6 +219,7 @@ def main():
     if output("git", "-C", repo, "rev-parse", "HEAD") != SOURCE_COMMIT:
         raise RuntimeError("Unexpected WASM source revision")
     archive_source(repo, source)
+    check_source_resources(source, MODERN_SOURCE)
     for line in output("git", "-C", repo, "submodule", "status", "--recursive").splitlines():
         if line[0] in "-+U":
             raise RuntimeError(f"Unpinned submodule: {line}")

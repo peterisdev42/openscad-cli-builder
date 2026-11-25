@@ -6,7 +6,7 @@ import os
 import re
 import subprocess
 
-from upstream_versions import api, discover, latest_stable, remote_tags, snapshot_metadata
+from upstream_versions import api, discover, latest_stable, release_by_tag, remote_tags, snapshot_metadata
 
 
 def release_pages(repository):
@@ -23,7 +23,7 @@ def candidate_status(candidate, releases):
     current = releases.get(candidate["tag"])
     if current is None:
         return "new"
-    if current.get("draft"):
+    if current.get("draft") or current.get("_orphaned"):
         return "conflict"
     body = current.get("body") or ""
     header = body.split("\n" + chr(96) * 3, 1)[0]
@@ -94,6 +94,15 @@ def main():
     repository = os.environ["GITHUB_REPOSITORY"]
     candidates = discover(remote_tags(), latest_stable(), snapshot_metadata())
     releases = {r["tag_name"]: r for r in release_pages(repository)}
+    # An orphaned release can be absent from the collection but still block
+    # creation of a release with the same tag.
+    for candidate in candidates:
+        tag = candidate["tag"]
+        if tag not in releases:
+            direct = release_by_tag(repository, tag)
+            if direct is not None:
+                releases[tag] = dict(direct, _orphaned=True)
+                print(f"Release {tag} is missing from listing but exists by tag (ID {direct['id']})")
     branch = os.environ["GITHUB_REF_NAME"]
     runs = list(active_build_runs(repository, branch))
     classify_candidates(candidates, releases, runs)

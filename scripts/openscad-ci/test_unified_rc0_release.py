@@ -30,7 +30,7 @@ class UnifiedReleaseTests(unittest.TestCase):
         with patch.object(release, "SOURCE_TAG", "openscad-2026.11-RC0"), \
              patch.object(release, "VERSION", "2026.11-RC0"), \
              patch.object(release, "RELEASE_TAG", "openscad-2026.11-RC0"), \
-             patch.dict(os.environ, {"OPENSCAD_SNAPSHOT": "false"}):
+             patch.dict(os.environ, {"OPENSCAD_SNAPSHOT": "false", "OPENSCAD_SNAPSHOT_URL": ""}):
             body = release.release_notes("peterisdev42/openscad-cli-builder")
             self.assertTrue(body.startswith("```yaml\nschemaVersion: 1\n"))
             self.assertIn('version: "2026.11-RC0"', body)
